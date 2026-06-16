@@ -596,7 +596,30 @@ export default function App() {
               </div>
 
               <div className="dashboard-grid" style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:24 }}>
-                <div>
+                {/* col-left: atividade + gráfico */}
+                <div className="dashboard-col-left">
+                  <div className="dashboard-activity-block">
+                    <div className="section-header"><div><div className="section-title">Atividade Recente</div></div></div>
+                    <div className="table-container" style={{ padding:'8px 16px' }}>
+                      <ActivityList items={activity.slice(0, 5)} />
+                    </div>
+                  </div>
+                  <div className="dashboard-chart-block" style={{ marginTop:24 }}>
+                    <div className="chart-container">
+                      <div className="section-title">Recebimentos — Últimos 6 Meses</div>
+                      <div className="simple-bar-chart">
+                        {months.map(m => (
+                          <div key={m.key} className="bar-wrap">
+                            <div className="bar" style={{ height: `${(m.value/maxBar)*100}%` }} title={`R$ ${fmt(m.value)}`}></div>
+                            <div className="bar-label">{m.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* col-right desktop / bottom mobile: Dívidas Recentes */}
+                <div className="dashboard-debts-block">
                   <div className="section-header">
                     <div><div className="section-title">Dívidas Recentes</div><div className="section-subtitle">Últimas movimentações</div></div>
                     <button className="btn btn-ghost btn-sm" onClick={() => navigate('debts')}>Ver todas</button>
@@ -620,27 +643,6 @@ export default function App() {
                         })}
                       </tbody>
                     </table>
-                  </div>
-                </div>
-                <div>
-                  <div className="section-header"><div><div className="section-title">Atividade Recente</div></div></div>
-                  <div className="table-container" style={{ padding:'8px 16px' }}>
-                    <ActivityList items={activity.slice(0, 5)} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Bar chart */}
-              <div style={{ marginTop:24 }}>
-                <div className="chart-container">
-                  <div className="section-title">Recebimentos — Últimos 6 Meses</div>
-                  <div className="simple-bar-chart">
-                    {months.map(m => (
-                      <div key={m.key} className="bar-wrap">
-                        <div className="bar" style={{ height: `${(m.value/maxBar)*100}%` }} title={`R$ ${fmt(m.value)}`}></div>
-                        <div className="bar-label">{m.label}</div>
-                      </div>
-                    ))}
                   </div>
                 </div>
               </div>
@@ -1257,6 +1259,7 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:600}}>Parcela {idx+1} · R$ {fmt(inst.value)}</div>
                   <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtD(inst.dueDate)}{isPaid && inst.paidAt ? ` · Pago em ${fmtD(inst.paidAt)}` : ''}</div>
+      
                 </div>
                 {!isPaid && (
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
@@ -1270,3 +1273,20 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
     </>
   );
 }
+t:6}}>+juros</span>}
+                    </div>
+                  </div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:14,fontWeight:700}} className="currency">R$ {fmt(inst.value)}</div>
+                  {inst.status==='pending' && <div style={{fontSize:10,color:'var(--color-primary)',marginTop:2}}>Toque p/ pagar</div>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+

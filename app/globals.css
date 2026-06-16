@@ -1929,3 +1929,157 @@ select.form-control option {
   .btn { min-height: 44px; }
   .btn-sm { min-height: 36px; padding: 6px 12px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   DASHBOARD LAYOUT + MOBILE FONT BOOST
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Desktop: dashboard-grid uses the existing 2-col layout */
+.dashboard-col-left  { display: contents; } /* let grid handle it */
+.dashboard-debts-block { }
+
+@media (max-width: 768px) {
+  /* Override grid → flex-column on mobile */
+  .dashboard-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 20px !important;
+  }
+
+  /* Order: atividade + gráfico first, then dívidas recentes at bottom */
+  .dashboard-col-left   { display: flex; flex-direction: column; gap: 20px; order: 1; }
+  .dashboard-debts-block { order: 2; }
+
+  /* ── FONT SIZE BOOST ── */
+
+  /* KPI cards */
+  .kpi-label  { font-size: 13px !important; }
+  .kpi-value  { font-size: 26px !important; font-weight: 800 !important; }
+  .kpi-card   { padding: 16px !important; border-radius: 16px !important; }
+
+  /* Section headers */
+  .section-title    { font-size: 17px !important; font-weight: 700 !important; }
+  .section-subtitle { font-size: 13px !important; }
+
+  /* Debt mobile cards */
+  .debt-mobile-card-name  { font-size: 16px !important; }
+  .debt-mobile-card-sub   { font-size: 13px !important; }
+  .debt-mobile-card-value { font-size: 22px !important; font-weight: 800 !important; }
+  .debt-mobile-card-inst  { font-size: 13px !important; }
+  .debt-mobile-card-actions button { font-size: 14px !important; padding: 10px 0 !important; min-height: 40px !important; }
+
+  /* Mobile header */
+  .mobile-header-title { font-size: 17px !important; }
+  .mobile-header-page  { font-size: 13px !important; }
+  .mobile-overdue-pill { font-size: 13px !important; }
+  .mobile-overdue-pill span { font-size: 14px !important; }
+
+  /* Mobile dropdown menu */
+  .mobile-menu-label { font-size: 16px !important; }
+  .mobile-menu-sub   { font-size: 13px !important; }
+  .mobile-menu-icon  { width: 44px !important; height: 44px !important; }
+  .mobile-menu-icon svg { width: 20px !important; height: 20px !important; }
+  .mobile-menu-item  { min-height: 62px !important; padding: 14px 12px !important; }
+
+  /* Activity */
+  .activity-text { font-size: 14px !important; }
+  .activity-time { font-size: 12px !important; }
+
+  /* Buttons */
+  .btn        { font-size: 15px !important; min-height: 46px !important; }
+  .btn-sm     { font-size: 13px !important; min-height: 38px !important; }
+
+  /* Table (shown on dashboard Dívidas Recentes via mobile scroll) */
+  .data-table th, .data-table td { font-size: 13px !important; }
+
+  /* Settings cards */
+  .settings-card-title    { font-size: 15px !important; }
+  .settings-card-subtitle { font-size: 13px !important; }
+  .form-label             { font-size: 14px !important; }
+  .form-control           { font-size: 16px !important; }
+
+  /* Toast */
+  .toast-title { font-size: 14px !important; }
+  .toast-body  { font-size: 13px !important; }
+}
+
+@media (max-width: 375px) {
+  .kpi-value            { font-size: 22px !important; }
+  .debt-mobile-card-value { font-size: 19px !important; }
+}
+ }
+  .side-panel::before {
+    content: '';
+    display: block; width: 40px; height: 4px;
+    background: var(--border-strong); border-radius: 99px;
+    margin: 12px auto -4px;
+  }
+  .side-panel-header { padding: 14px 20px 14px; }
+
+  /* ── MODALS → Bottom Sheet ───────────────────────────── */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal {
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+    border-bottom: none;
+    max-width: 100% !important;
+    width: 100%;
+    max-height: 94svh;
+    overflow-y: auto;
+    padding-bottom: calc(var(--safe-bottom) + 16px);
+    animation: slideUp .28s cubic-bezier(.32,1.2,.64,1);
+  }
+  @keyframes slideUp { from { transform: translateY(60px); opacity:0; } to { transform: none; opacity:1; } }
+  .modal-header { padding-top: 8px; }
+  .modal-header::before {
+    content: ''; display: block;
+    width: 40px; height: 4px;
+    background: var(--border-strong); border-radius: 99px;
+    margin: 0 auto 14px;
+  }
+  .modal-footer { flex-direction: column-reverse; gap: 8px; }
+  .modal-footer .btn { width: 100%; justify-content: center; padding: 15px; font-size: 15px; min-height: 52px; border-radius: var(--radius-lg); }
+
+  /* ── FORMS ───────────────────────────────────────────── */
+  .form-grid { grid-template-columns: 1fr; gap: 14px; }
+  .form-control { padding: 13px 14px; font-size: 16px; } /* 16px evita zoom no iOS */
+  textarea.form-control { font-size: 15px; }
+
+  /* ── CALENDAR ITEMS ──────────────────────────────────── */
+  [class*="table-container"].row-overdue,
+  [class*="table-container"].row-warning {
+    border-radius: var(--radius-lg);
+    padding: 14px !important;
+  }
+
+  /* ── TOAST → acima da bottom nav ─────────────────────── */
+  .toast-container {
+    bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 12px);
+    right: 14px; left: 14px;
+  }
+  .toast { min-width: unset; max-width: 100%; }
+  @keyframes toastIn { from { opacity:0; transform: translateY(8px) scale(.97); } to { opacity:1; transform: none; } }
+
+  /* ── SETTINGS ────────────────────────────────────────── */
+  .settings-card { padding: 16px; border-radius: var(--radius-lg); }
+
+  /* ── CHART ───────────────────────────────────────────── */
+  .chart-container { padding: 16px; margin-top: 16px; }
+  .simple-bar-chart { height: 90px; gap: 5px; }
+  .bar-label { font-size: 10px; }
+
+  /* ── ACTIVITY ────────────────────────────────────────── */
+  .activity-text { font-size: 12px; }
+  .table-container { padding: 0 4px !important; }
+
+  /* Dashboard 2-col grid → 1 col */
+  .dashboard-grid { display: flex !important; flex-direction: column !important; gap: 16px; }
+}
+
+/* Phones muito pequenos ≤ 375px */
+@media (max-width: 375px) {
+  .kpi-value { font-size: 16px; }
+  .kpi-grid  { gap: 8px; }
+  .page-content { padding: 12px 10px; }
+  .debt-mobile-card-value { font-size: 18px; }
+}
+
