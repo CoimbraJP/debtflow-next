@@ -596,30 +596,7 @@ export default function App() {
               </div>
 
               <div className="dashboard-grid" style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:24 }}>
-                {/* col-left: atividade + gráfico */}
-                <div className="dashboard-col-left">
-                  <div className="dashboard-activity-block">
-                    <div className="section-header"><div><div className="section-title">Atividade Recente</div></div></div>
-                    <div className="table-container" style={{ padding:'8px 16px' }}>
-                      <ActivityList items={activity.slice(0, 5)} />
-                    </div>
-                  </div>
-                  <div className="dashboard-chart-block" style={{ marginTop:24 }}>
-                    <div className="chart-container">
-                      <div className="section-title">Recebimentos — Últimos 6 Meses</div>
-                      <div className="simple-bar-chart">
-                        {months.map(m => (
-                          <div key={m.key} className="bar-wrap">
-                            <div className="bar" style={{ height: `${(m.value/maxBar)*100}%` }} title={`R$ ${fmt(m.value)}`}></div>
-                            <div className="bar-label">{m.label}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {/* col-right desktop / bottom mobile: Dívidas Recentes */}
-                <div className="dashboard-debts-block">
+                <div>
                   <div className="section-header">
                     <div><div className="section-title">Dívidas Recentes</div><div className="section-subtitle">Últimas movimentações</div></div>
                     <button className="btn btn-ghost btn-sm" onClick={() => navigate('debts')}>Ver todas</button>
@@ -643,6 +620,25 @@ export default function App() {
                         })}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+                <div>
+                  <div className="section-header"><div><div className="section-title">Atividade Recente</div></div></div>
+                  <div className="table-container" style={{ padding:'8px 16px' }}>
+                    <ActivityList items={activity.slice(0, 5)} />
+                  </div>
+                  <div style={{ marginTop:24 }}>
+                    <div className="chart-container">
+                      <div className="section-title">Recebimentos — Últimos 6 Meses</div>
+                      <div className="simple-bar-chart">
+                        {months.map(m => (
+                          <div key={m.key} className="bar-wrap">
+                            <div className="bar" style={{ height: `${(m.value/maxBar)*100}%` }} title={`R$ ${fmt(m.value)}`}></div>
+                            <div className="bar-label">{m.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
