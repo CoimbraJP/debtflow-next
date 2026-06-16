@@ -2155,3 +2155,54 @@ select.form-control option {
   /* Form inputs — 16px evita zoom iOS */
   input, select, textarea, .form-control { font-size: 16px !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE FIXES V5
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 1 — Dropdown menu: fundo sólido sem transparência */
+.mobile-dropdown {
+  background: #0d0f1a !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+}
+.mobile-menu-item:hover,
+.mobile-menu-item.active {
+  background: rgba(255,255,255,0.06) !important;
+}
+.mobile-menu-label { color: #e2e8f0 !important; }
+.mobile-menu-sub   { color: #64748b !important; }
+
+/* 2 — Botões do card: 3 iguais lado a lado */
+.debt-mobile-card-actions {
+  display: flex;
+  gap: 8px;
+}
+.card-action-btn {
+  flex: 1;
+  padding: 10px 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  text-align: center;
+  white-space: nowrap;
+}
+.card-action-cobrar {
+  background: rgba(37,211,102,0.12);
+  border-color: rgba(37,211,102,0.3);
+  color: #25d366;
+}
+.card-action-edit {
+  background: rgba(108,99,255,0.1);
+  border-color: rgba(108,99,255,0.25);
+  color: #a78bfa;
+}
+.card-action-del {
+  background: rgba(255,71,87,0.08);
+  border-color: rgba(255,71,87,0.2);
+  color: #ff4757;
+}
