@@ -19,9 +19,28 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: 'Parcela não encontrada' }, { status: 404 });
   }
 
-  const inst    = debt.installmentList[i];
-  inst.status   = 'paid';
-  inst.paidDate = payDate;
+  const inst       = debt.installmentList[i];
+  const dueValue   = parseFloat(inst.value) || 0;
+  const payAmount  = body.payAmount && body.payAmount > 0 ? parseFloat(body.payAmount) : dueValue;
+  const isPartial  = payAmount < dueValue - 0.009; // tolerância de 1 centavo
+
+  inst.status     = 'paid';
+  inst.paidDate   = payDate;
+  inst.paidAmount = payAmount;
+
+  // Se pagamento parcial, adiciona saldo restante + juros à próxima parcela
+  if (isPartial) {
+    const remainder    = dueValue - payAmount;
+    const interestRate = parseFloat(debt.interestRate) || 0;
+    const penalty      = remainder * (1 + interestRate / 100);
+
+    // Encontra a próxima parcela não paga
+    const nextInst = debt.installmentList.find((p, j) => j > i && p.status !== 'paid');
+    if (nextInst) {
+      nextInst.value     = parseFloat(nextInst.value) + parseFloat(penalty.toFixed(2));
+      nextInst.isPenalty = true;
+    }
+  }
 
   const allPaid = debt.installmentList.every(p => p.status === 'paid');
   if (allPaid) {
@@ -33,11 +52,10 @@ export async function POST(request, { params }) {
     });
   } else {
     debt.status = 'pending';
-    await Activity.create({
-      tenant,
-      text: `💰 Pagamento registrado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (R$ ${Number(inst.value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`,
-      type: 'success',
-    });
+    const desc = isPartial
+      ? `💰 Pagamento parcial: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (pago R$ ${payAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de R$ ${dueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
+      : `💰 Pagamento registrado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (R$ ${dueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+    await Activity.create({ tenant, text: desc, type: 'success' });
   }
 
   await debt.save();

@@ -10,7 +10,7 @@ const AVATAR_COLORS = [
 ];
 const DEFAULT_SETTINGS = {
   apiUrl: '', instance: '', apiKey: '', defaultInterest: 10,
-  msgTemplate: 'Olá {nome}! 👋 Passando para lembrar que sua parcela referente a *{produto}* no valor de *R$ {valor}* vence em *{vencimento}*. Por favor, efetue o pagamento para evitar juros de atraso. Obrigado! 🙏',
+  msgTemplate: 'Olá {nome}! 👋 Passando para lembrar que sua parcela *{parcela}/{total_parcelas}* referente a *{produto}* no valor de *R$ {valor}* vence em *{vencimento}*. Por favor, efetue o pagamento para evitar juros de atraso. Obrigado! 🙏',
   msgOverdue:  'Olá {nome}! Identificamos que a parcela {parcela}/{total_parcelas} referente a *{produto}* no valor de *R$ {valor}* está em *atraso* há {dias_atraso} dia(s). O novo valor com juros é *R$ {valor_com_juros}*. Entre em contato para regularizar sua situação. 😊',
 };
 const EMPTY_FORM = {
@@ -222,12 +222,12 @@ export default function App() {
 
   // ── Pagamentos ─────────────────────────────────────────────────────────
   function openPayModal(debt, inst, idx) {
-    setPayInfo({ debt, inst, idx, date: today });
+    setPayInfo({ debt, inst, idx, date: today, payAmount: inst?.value ?? '' });
     setPayModal(true);
   }
   async function confirmPayment() {
-    const { debt, idx, date } = payInfo;
-    const r = await api(`/api/debts/${debt.id}/pay/${idx}`, { method: 'POST', body: JSON.stringify({ payDate: date }) });
+    const { debt, idx, date, payAmount } = payInfo;
+    const r = await api(`/api/debts/${debt.id}/pay/${idx}`, { method: 'POST', body: JSON.stringify({ payDate: date, payAmount: parseFloat(payAmount) || null }) });
     if (r?.ok) {
       const updated = await r.json();
       toast(`Parcela ${payInfo.inst.number} de ${debt.name} registrada!`, 'success', 'Pagamento registrado');
@@ -999,10 +999,21 @@ export default function App() {
       {/* ── MODAL: Pagamento ─────────────────────────────────────── */}
       <Modal open={payModal} onClose={() => setPayModal(false)} title="Registrar Pagamento" subtitle="Confirme o pagamento da parcela" maxWidth={420}>
         {payInfo.inst && <>
-          {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
+          {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor Devido',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
             <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value currency">{v}</span></div>
           ))}
           <div className="form-group" style={{marginTop:16}}>
+            <label className="form-label">Valor Pago</label>
+            <input className="form-control" type="number" step="0.01" min="0.01"
+              value={payInfo.payAmount ?? ''}
+              onChange={e => setPayInfo(p => ({...p, payAmount: e.target.value}))} />
+            {parseFloat(payInfo.payAmount) < parseFloat(payInfo.inst?.value) - 0.009 && parseFloat(payInfo.payAmount) > 0 && (
+              <span className="form-hint" style={{color:'var(--color-warning)',marginTop:6,display:'block'}}>
+                ⚠️ Pagamento parcial: saldo restante de R$ {fmt(payInfo.inst.value - parseFloat(payInfo.payAmount))} terá juros de {payInfo.debt?.interestRate ?? 0}% e será somado à próxima parcela.
+              </span>
+            )}
+          </div>
+          <div className="form-group">
             <label className="form-label">Data do Pagamento</label>
             <input className="form-control" type="date" value={payInfo.date} onChange={e=>setPayInfo(p=>({...p,date:e.target.value}))} />
           </div>
@@ -1221,7 +1232,7 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
             </button>
           )}
           {firstPending && (
-            <button className="btn btn-primary btn-sm" onClick={() => onPay(debt, debt.installmentList?.indexOf(firstPending))} style={{flex:1,minWidth:100}}>
+            <button className="btn btn-primary btn-sm" onClick={() => onPay(debt, firstPending, debt.installmentList?.indexOf(firstPending))} style={{flex:1,minWidth:100}}>
               💰 Registrar Pagto
             </button>
           )}
@@ -1252,11 +1263,11 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:600}}>Parcela {idx+1} · R$ {fmt(inst.value)}</div>
                   <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtD(inst.dueDate)}{isPaid && inst.paidAt ? ` · Pago em ${fmtD(inst.paidAt)}` : ''}</div>
-      
+
                 </div>
                 {!isPaid && (
                   <button className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
-                    onClick={() => onPay(debt, idx)}>Pagar</button>
+                    onClick={() => onPay(debt, inst, idx)}>Pagar</button>
                 )}
               </div>
             );
