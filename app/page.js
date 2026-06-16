@@ -1270,20 +1270,3 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
     </>
   );
 }
-rginLeft:6}}>+juros</span>}
-                    </div>
-                  </div>
-                </div>
-                <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:14,fontWeight:700}} className="currency">R$ {fmt(inst.value)}</div>
-                  {inst.status==='pending' && <div style={{fontSize:10,color:'var(--color-primary)',marginTop:2}}>Toque p/ pagar</div>}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
