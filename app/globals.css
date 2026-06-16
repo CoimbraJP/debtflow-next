@@ -130,6 +130,13 @@ img { display: block; max-width: 100%; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(108,99,255,0.5); }
 
 /* ── LAYOUT ─────────────────────────────────────────────────── */
+
+/* ── PREVENT HORIZONTAL SCROLL ON MOBILE ── */
+html, body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 .app-layout {
   display: flex;
   min-height: 100vh;
@@ -2081,3 +2088,70 @@ select.form-control option {
   .debt-mobile-card-value { font-size: 18px; }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE OVERRIDE — ANTIOVERFLOW + LAYOUT FIX
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  /* Garantir que nada extravase a largura da tela */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body, .app-layout, .main-content {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  .top-header {
+    min-width: 0;
+    max-width: 100vw;
+  }
+  /* Esconde busca e botão do header no mobile */
+  .header-search { display: none !important; }
+  .header-actions .btn { display: none !important; }
+  /* Garante que tabelas não causem overflow horizontal */
+  .table-container {
+    overflow-x: auto;
+    max-width: calc(100vw - 32px);
+  }
+  .data-table {
+    min-width: unset;
+    width: 100%;
+  }
+  /* KPI 2 colunas em tablets */
+  .kpi-grid { grid-template-columns: 1fr 1fr !important; }
+  /* Dashboard single column */
+  .dashboard-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+}
+
+@media (max-width: 640px) {
+  /* KPI 2 colunas no celular (mais legível que 1) */
+  .kpi-grid { grid-template-columns: 1fr 1fr !important; }
+  .kpi-value { font-size: 20px !important; }
+  .kpi-label { font-size: 12px !important; }
+  .kpi-card  { padding: 14px !important; }
+
+  /* Page padding */
+  .page-content { padding: 14px 12px !important; }
+
+  /* Section titles */
+  .section-title { font-size: 16px !important; font-weight: 700 !important; }
+
+  /* Botões touch friendly */
+  .btn { min-height: 44px !important; font-size: 15px !important; }
+  .btn-sm { min-height: 36px !important; font-size: 13px !important; }
+
+  /* Cards de dívida */
+  .debt-mobile-card-name  { font-size: 15px !important; }
+  .debt-mobile-card-value { font-size: 20px !important; font-weight: 800 !important; }
+  .debt-mobile-card-sub   { font-size: 13px !important; }
+  .debt-mobile-card-inst  { font-size: 12px !important; }
+
+  /* Activity */
+  .activity-text { font-size: 13px !important; }
+  .activity-time { font-size: 11px !important; }
+
+  /* Form inputs — 16px evita zoom iOS */
+  input, select, textarea, .form-control { font-size: 16px !important; }
+}
