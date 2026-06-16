@@ -1515,129 +1515,200 @@ select.form-control option {
   background-clip: text;
 }
 
-/* ── SIDE PANEL ────────────────────────────────────────────────── */
-.side-panel-backdrop {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0);
-  pointer-events: none;
-  z-index: 400;
-  transition: background .2s;
-}
-.side-panel-backdrop.open {
-  background: rgba(0,0,0,.5);
-  pointer-events: all;
-}
-.side-panel {
-  position: absolute; right: 0; top: 0; bottom: 0;
-  width: min(440px, 100vw);
-  background: var(--bg-card);
-  border-left: 1px solid var(--border-default);
-  transform: translateX(100%);
-  transition: transform .25s cubic-bezier(.4,0,.2,1);
-  display: flex; flex-direction: column;
-  overflow: hidden;
-}
-.side-panel-backdrop.open .side-panel {
-  transform: translateX(0);
-}
-.side-panel-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 12px; padding: 24px;
-  border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-.side-panel-body {
-  flex: 1; overflow-y: auto; padding: 24px;
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE — iPhone 17 Pro (≤768px)
+   ═══════════════════════════════════════════════════════════════ */
+
+.desktop-only { display: block; }
+.mobile-only  { display: none; }
+.bottom-nav   { display: none; }
+.fab          { display: none; }
+
+@media (max-width: 768px) {
+  :root {
+    --bottom-nav-height: 68px;
+    --safe-top:    env(safe-area-inset-top,    0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* visibility toggles */
+  .desktop-only { display: none !important; }
+  .mobile-only  { display: block !important; }
+
+  /* ── Bottom Navigation Bar ── */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: calc(var(--bottom-nav-height) + var(--safe-bottom));
+    padding-bottom: var(--safe-bottom);
+    background: rgba(10, 12, 22, 0.97);
+    border-top: 1px solid var(--border-subtle);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    z-index: 400;
+  }
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 10px;
+    gap: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    position: relative;
+    font-size: 10px;
+    min-height: 44px;
+  }
+  .bottom-nav-item svg { width: 22px; height: 22px; }
+  .bottom-nav-item.active { color: var(--color-primary); }
+  .bottom-nav-item.active::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 28px; height: 2.5px;
+    background: var(--color-primary);
+    border-radius: 0 0 6px 6px;
+  }
+  .bottom-nav-label { font-size: 10px; font-weight: 500; }
+  .bottom-nav-badge {
+    position: absolute;
+    top: 7px; left: calc(50% + 6px);
+    background: var(--color-danger);
+    color: #fff;
+    font-size: 9px; font-weight: 800;
+    padding: 0 4px;
+    min-width: 15px; height: 15px;
+    border-radius: 99px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── FAB ── */
+  .fab {
+    display: flex;
+    position: fixed;
+    right: 20px;
+    bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 14px);
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent) 100%);
+    box-shadow: 0 4px 20px rgba(108,99,255,.55);
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 300;
+    border: none;
+  }
+  .fab svg { width: 24px; height: 24px; color: #fff; }
+
+  /* ── Debt Mobile Cards ── */
+  .debt-cards-list { display: flex; flex-direction: column; gap: 10px; }
+  .debt-mobile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .debt-mobile-card.overdue  { border-color: rgba(255,71,87,.35); background: rgba(255,71,87,.04); }
+  .debt-mobile-card.warning  { border-color: rgba(255,165,0,.35); background: rgba(255,165,0,.04); }
+  .debt-mobile-card-top      { display: flex; align-items: center; gap: 10px; }
+  .debt-mobile-card-info     { flex: 1; min-width: 0; }
+  .debt-mobile-card-name     { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .debt-mobile-card-sub      { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .debt-mobile-card-mid      { display: flex; justify-content: space-between; align-items: flex-end; }
+  .debt-mobile-card-value    { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+  .debt-mobile-card-inst     { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .debt-mobile-card-actions  { display: flex; gap: 8px; }
+  .debt-mobile-card-actions button {
+    flex: 1;
+    padding: 8px 0;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+    min-height: 36px;
+  }
+  .debt-mobile-card-actions button:first-child { border-color: var(--color-success); color: var(--color-success); }
+
+  /* ── Modals → bottom sheets ── */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal {
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+    max-width: 100% !important;
+    width: 100%;
+    max-height: 94svh;
+    overflow-y: auto;
+    padding-bottom: calc(var(--safe-bottom) + 16px);
+    animation: slideUp .28s cubic-bezier(.32,1.2,.64,1);
+  }
+  @keyframes slideUp {
+    from { transform: translateY(60px); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+  }
+
+  /* ── Side panel → bottom sheet ── */
+  .side-panel {
+    position: relative;
+    width: 100vw;
+    height: 90svh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    transform: translateY(100%);
+    transition: transform .3s cubic-bezier(.32,1.2,.64,1);
+  }
+  .side-panel-backdrop.open .side-panel { transform: translateY(0); }
+
+  /* ── Toast above bottom nav ── */
+  .toast-container {
+    bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 12px);
+    right: 14px; left: 14px;
+  }
+
+  /* ── Prevent iOS zoom on inputs (font must be ≥16px) ── */
+  .form-control { font-size: 16px !important; }
+  input, select, textarea { font-size: 16px !important; }
+
+  /* ── Dashboard ── */
+  .dashboard-grid { display: flex !important; flex-direction: column !important; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* ── Main content padding (above bottom nav) ── */
+  .main-content { padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 8px) !important; }
+  .page-content { padding: 14px 12px; }
+
+  /* ── Header safe area (Dynamic Island) ── */
+  .app-header { padding-top: calc(var(--safe-top) + 12px); }
+
+  /* ── Filter bar horizontal scroll ── */
+  .filter-bar {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .filter-bar::-webkit-scrollbar { display: none; }
+  .filter-btn { white-space: nowrap; flex-shrink: 0; }
 }
 
-/* ── INSTALLMENT LIST ──────────────────────────────────────────── */
-.installment-list { display: flex; flex-direction: column; gap: 10px; }
-.installment-item {
-  display: flex; align-items: center; gap: 14px;
-  padding: 12px 16px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  transition: border-color .15s;
+/* ── Very small screens (≤375px) ── */
+@media (max-width: 375px) {
+  .kpi-value { font-size: 16px !important; }
+  .page-content { padding: 12px 10px; }
+  .debt-mobile-card-value { font-size: 16px; }
 }
-.installment-item.paid   { opacity: .6; }
-.installment-item.overdue { border-color: rgba(var(--color-danger-rgb, 255,77,77), .4); }
-.installment-item.penalty { border-color: rgba(var(--color-warning-rgb, 255,179,0), .4); }
-.installment-num {
-  font-size: 11px; font-weight: 700; color: var(--text-muted);
-  width: 24px; text-align: center; flex-shrink: 0;
-}
-.installment-info { flex: 1; min-width: 0; }
-.installment-due  { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.installment-value{ font-size: 13px; font-weight: 700; }
-.installment-penalty-badge { font-size: 10px; color: var(--color-warning); font-weight: 600; }
-
-/* ── BAR CHART ─────────────────────────────────────────────────── */
-.chart-container {
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-xl);
-  padding: 24px;
-}
-.simple-bar-chart {
-  display: flex; align-items: flex-end; gap: 8px;
-  height: 130px; margin-top: 20px;
-}
-.bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; }
-.bar {
-  width: 100%; min-height: 4px;
-  background: var(--color-primary);
-  border-radius: 4px 4px 0 0;
-  opacity: .8;
-  transition: opacity .15s;
-}
-.bar:hover { opacity: 1; }
-.bar-label { font-size: 11px; color: var(--text-muted); text-transform: capitalize; }
-
-/* ── ACTIVITY LIST ─────────────────────────────────────────────── */
-.activity-list   { display: flex; flex-direction: column; }
-.activity-item   { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
-.activity-item:last-child { border-bottom: none; }
-.activity-dot    { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
-.activity-content{ flex: 1; }
-.activity-text   { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
-.activity-time   { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
-
-/* ── SETTINGS CARDS ────────────────────────────────────────────── */
-.settings-card { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: 24px; margin-bottom: 20px; }
-.settings-card-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
-.settings-card-subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
-.settings-divider { height: 1px; background: var(--border-subtle); margin: 20px 0; }
-.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
-.stat-row:last-child { border-bottom: none; }
-.stat-row-label { color: var(--text-muted); }
-.stat-row-value { font-weight: 600; color: var(--text-primary); }
-.text-success { color: var(--color-success) !important; }
-.text-danger  { color: var(--color-danger)  !important; }
-
-/* ── TOASTS ────────────────────────────────────────────────────── */
-.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
-.toast { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); background: var(--bg-card); backdrop-filter: blur(20px); box-shadow: 0 8px 32px rgba(0,0,0,.4); min-width: 280px; max-width: 360px; animation: toastIn .3s cubic-bezier(.34,1.56,.64,1); pointer-events: all; }
-.toast.success { border-color: rgba(0, 212, 170, .4); }
-.toast.danger  { border-color: rgba(255,77,77,.4); }
-.toast.warning { border-color: rgba(255,179,0,.4); }
-.toast-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
-.toast.success .toast-icon { color: var(--color-success); }
-.toast.danger  .toast-icon { color: var(--color-danger); }
-.toast.warning .toast-icon { color: var(--color-warning); }
-.toast.info    .toast-icon { color: var(--color-primary); }
-.toast-text { flex: 1; }
-.toast-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
-.toast-body  { font-size: 12px; color: var(--text-secondary); }
-@keyframes toastIn { from { opacity:0; transform: translateX(20px) scale(.96); } to { opacity:1; transform: none; } }
-
-/* ── SPINNER ───────────────────────────────────────────────────── */
-.spinner { width: 24px; height: 24px; border: 2px solid var(--border-default); border-top-color: var(--color-primary); border-radius: 50%; animation: spin .7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ── ROW COLORS ────────────────────────────────────────────────── */
-.row-overdue { background: rgba(255,77,77,.04); }
-.row-warning { background: rgba(255,179,0,.04); }
+d: rgba(255,179,0,.04); }
 
 /* ── MISC ──────────────────────────────────────────────────────── */
 .input-prefix-wrapper { position: relative; }
