@@ -1173,4 +1173,3 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
   );
 }
 
-        
