@@ -1180,7 +1180,8 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
           <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
             <div className="table-avatar" style={{width:48,height:48,borderRadius:'50%',background:'var(--color-primary)',fontSize:20,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>{debt.name[0]?.toUpperCase()}</div>
             <div>
-              <div
+              <div style={{fontWeight:700,fontSize:16}}>{debt.name}</div>
+              {debt.phone && <div style={{fontSize:13,color:'var(--text-muted)'}}>{debt.phone}</div>}
               {debt.address && <div style={{fontSize:12,color:'var(--text-muted)'}}>{debt.address}</div>}
             </div>
           </div>
