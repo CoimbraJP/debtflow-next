@@ -1,0 +1,1176 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+
+// ── Constantes ────────────────────────────────────────────────────────────
+const AVATAR_COLORS = [
+  '#6C63FF','#00D4AA','#FF6B6B','#FFA502','#3D5AFE',
+  '#FF4081','#00BCD4','#8BC34A','#FF7043','#AB47BC',
+];
+const DEFAULT_SETTINGS = {
+  apiUrl: '', instance: '', apiKey: '', defaultInterest: 10,
+  msgTemplate: 'Olá {nome}! 👋 Passando para lembrar que sua parcela referente a *{produto}* no valor de *R$ {valor}* vence em *{vencimento}*. Por favor, efetue o pagamento para evitar juros de atraso. Obrigado! 🙏',
+  msgOverdue:  'Olá {nome}! Identificamos que a parcela {parcela}/{total_parcelas} referente a *{produto}* no valor de *R$ {valor}* está em *atraso* há {dias_atraso} dia(s). O novo valor com juros é *R$ {valor_com_juros}*. Entre em contato para regularizar sua situação. 😊',
+};
+const EMPTY_FORM = {
+  name: '', phone: '', address: '', product: '', total: '', installments: '',
+  dueDay: '', interestRate: 10, startDate: '', notes: '', paidInstallments: '',
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function fmt(val) {
+  return Number(val || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  const [y, m, d] = s.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function daysDiff(todayStr, dueStr) {
+  const t = new Date(todayStr + 'T00:00:00');
+  const d = new Date(dueStr   + 'T00:00:00');
+  return Math.round((d - t) / 86400000);
+}
+function avatarColor(name) {
+  let s = 0; for (const c of name) s += c.charCodeAt(0);
+  return AVATAR_COLORS[s % AVATAR_COLORS.length];
+}
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+
+// ── WhatsApp helpers ──────────────────────────────────────────────────────
+function buildMsg(template, debt, inst, extra = {}) {
+  const wi = inst.value * (1 + (debt.interestRate || 2) / 100);
+  return template
+    .replace(/{nome}/g,            debt.name)
+    .replace(/{produto}/g,         debt.product)
+    .replace(/{valor}/g,           fmt(inst.value))
+    .replace(/{valor_com_juros}/g, fmt(wi))
+    .replace(/{vencimento}/g,      fmtDate(inst.dueDate))
+    .replace(/{parcela}/g,         inst.number)
+    .replace(/{total_parcelas}/g,  debt.installments)
+    .replace(/{dias_atraso}/g,     extra.daysLate || 0);
+}
+async function sendViaAPI(phone, text, s) {
+  const url = `${s.apiUrl.replace(/\/$/, '')}/message/sendText/${s.instance}`;
+  const r   = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': s.apiKey },
+    body: JSON.stringify({ number: String(phone).replace(/\D/g, ''), text }),
+  });
+  return r.ok;
+}
+function openWaMe(phone, text) {
+  window.open(`https://wa.me/${String(phone).replace(/\D/g,'')}?text=${encodeURIComponent(text)}`, '_blank');
+}
+
+// ── Status badge ──────────────────────────────────────────────────────────
+function StatusBadge({ debt, today }) {
+  if (debt.status === 'paid') return <span className="badge muted"><span className="badge-dot"></span>Quitado</span>;
+  const next = debt.installmentList?.find(i => i.status !== 'paid');
+  if (!next) return <span className="badge muted"><span className="badge-dot"></span>Sem parcelas</span>;
+  const diff = daysDiff(today, next.dueDate);
+  if (diff < 0)  return <span className="badge danger"><span className="badge-dot"></span>{Math.abs(diff)}d atrasado</span>;
+  if (diff === 0) return <span className="badge warning"><span className="badge-dot"></span>Vence hoje</span>;
+  if (diff <= 5) return <span className="badge warning"><span className="badge-dot"></span>Em {diff}d</span>;
+  return <span className="badge primary"><span className="badge-dot"></span>Em dia</span>;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// COMPONENTE PRINCIPAL
+// ═════════════════════════════════════════════════════════════════════════
+export default function App() {
+  const router = useRouter();
+
+  // ── State ──────────────────────────────────────────────────────────────
+  const [debts,    setDebts]    = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [loading,  setLoading]  = useState(true);
+  const [page,     setPage]     = useState('dashboard');
+  const [filter,   setFilter]   = useState('all');
+  const [search,   setSearch]   = useState('');
+  const [sideDebt, setSideDebt] = useState(null); // debt object
+  const [toasts,   setToasts]   = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [adminName,   setAdminName]   = useState('Administrador');
+
+  // Modal: nova/editar dívida
+  const [debtModal,  setDebtModal]  = useState(false);
+  const [debtForm,   setDebtForm]   = useState(EMPTY_FORM);
+  const [editId,     setEditId]     = useState(null);
+
+  // Modal: pagamento
+  const [payModal,   setPayModal]   = useState(false);
+  const [payInfo,    setPayInfo]    = useState({ debt: null, inst: null, idx: null, date: todayStr() });
+
+  // Modal: excluir
+  const [delModal,   setDelModal]   = useState(false);
+  const [delDebt,    setDelDebt]    = useState(null);
+
+  // Modal: confirmação genérica
+  const [gcModal,    setGcModal]    = useState(false);
+  const [gcData,     setGcData]     = useState({ title:'', msg:'', label:'', style:'danger', fn:null });
+
+  // Settings form local
+  const [settForm,   setSettForm]   = useState(DEFAULT_SETTINGS);
+
+  const today = todayStr();
+
+  // ── API helpers ──────────────────────────────────────────────────────
+  async function api(path, opts = {}) {
+    const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    if (r.status === 401) { router.push('/login'); return null; }
+    return r;
+  }
+
+  // ── Fetch ──────────────────────────────────────────────────────────────
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    const [rd, ra, rs, rm] = await Promise.all([
+      api('/api/debts'), api('/api/activity'), api('/api/settings'), api('/api/me'),
+    ]);
+    if (rd?.ok) setDebts(await rd.json());
+    if (ra?.ok) setActivity(await ra.json());
+    if (rs?.ok) {
+      const s = await rs.json();
+      setSettings({ ...DEFAULT_SETTINGS, ...s });
+      setSettForm({ ...DEFAULT_SETTINGS, ...s });
+    }
+    if (rm?.ok) {
+      const me = await rm.json();
+      setAdminName(me.name);
+    }
+    setLoading(false);
+  }, []); // eslint-disable-line
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // ── Toast ───────────────────────────────────────────────────────────────
+  function toast(msg, type = 'info', title = '') {
+    const id = Date.now();
+    setToasts(t => [...t, { id, msg, type, title }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4200);
+  }
+
+  // ── Navigate ──────────────────────────────────────────────────────────
+  const PAGE_META = {
+    dashboard: { title: 'Dashboard',     subtitle: 'Visão geral do sistema' },
+    debts:     { title: 'Dívidas',       subtitle: 'Gerenciar todas as dívidas' },
+    calendar:  { title: 'Vencimentos',   subtitle: 'Calendário de cobranças' },
+    activity:  { title: 'Atividade',     subtitle: 'Histórico de eventos' },
+    settings:  { title: 'Configurações', subtitle: 'Preferências do sistema' },
+  };
+  function navigate(p) { setPage(p); setSidebarOpen(false); }
+
+  // ── CRUD Dívidas ───────────────────────────────────────────────────────
+  function openNewDebt() {
+    setEditId(null);
+    setDebtForm({ ...EMPTY_FORM, startDate: today, interestRate: settings.defaultInterest || 10 });
+    setDebtModal(true);
+  }
+  function openEditDebt(debt) {
+    setEditId(debt.id);
+    setDebtForm({
+      name: debt.name, phone: debt.phone || '', address: debt.address || '',
+      product: debt.product, total: debt.total, installments: debt.installments,
+      dueDay: debt.dueDay, interestRate: debt.interestRate,
+      startDate: debt.createdAt, notes: debt.notes || '',
+      paidInstallments: '',  // não preenchemos na edição
+    });
+    setDebtModal(true);
+  }
+  async function saveDebt() {
+    const f = debtForm;
+    if (!f.name || !f.product || !f.total || !f.installments || !f.dueDay || !f.startDate) {
+      toast('Preencha todos os campos obrigatórios', 'danger', 'Campos inválidos'); return;
+    }
+    if (f.dueDay < 1 || f.dueDay > 28) {
+      toast('Dia de vencimento deve ser entre 1 e 28', 'danger', 'Dia inválido'); return;
+    }
+    const body = {
+      ...f,
+      total:            parseFloat(f.total),
+      installments:     parseInt(f.installments),
+      dueDay:           parseInt(f.dueDay),
+      paidInstallments: parseInt(f.paidInstallments) || 0,
+    };
+    const r = editId
+      ? await api(`/api/debts/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+      : await api('/api/debts', { method: 'POST', body: JSON.stringify(body) });
+    if (!r) return;
+    if (r.ok) {
+      toast(editId ? `Dívida de ${f.name} atualizada!` : `Dívida de ${f.name} cadastrada!`, 'success', editId ? 'Atualizado' : 'Criado');
+      setDebtModal(false);
+      fetchAll();
+    } else {
+      const e = await r.json();
+      toast(e.error || 'Erro ao salvar', 'danger', 'Erro');
+    }
+  }
+  async function deleteDebt(debt) {
+    const r = await api(`/api/debts/${debt.id}`, { method: 'DELETE' });
+    if (r?.ok) {
+      toast('Dívida removida com sucesso', 'success', 'Removido');
+      setDelModal(false);
+      setSideDebt(null);
+      fetchAll();
+    }
+  }
+
+  // ── Pagamentos ─────────────────────────────────────────────────────────
+  function openPayModal(debt, inst, idx) {
+    setPayInfo({ debt, inst, idx, date: today });
+    setPayModal(true);
+  }
+  async function confirmPayment() {
+    const { debt, idx, date } = payInfo;
+    const r = await api(`/api/debts/${debt.id}/pay/${idx}`, { method: 'POST', body: JSON.stringify({ payDate: date }) });
+    if (r?.ok) {
+      const updated = await r.json();
+      toast(`Parcela ${payInfo.inst.number} de ${debt.name} registrada!`, 'success', 'Pagamento registrado');
+      setPayModal(false);
+      // Atualiza side panel se estiver aberto
+      if (sideDebt?.id === debt.id) setSideDebt(updated);
+      fetchAll();
+    }
+  }
+
+  // ── WhatsApp ───────────────────────────────────────────────────────────
+  async function sendWhatsApp(debt, inst, isOverdue = false) {
+    if (!debt.phone) { toast('Sem número de WhatsApp', 'warning', 'Atenção'); return; }
+    const template = isOverdue ? settings.msgOverdue : settings.msgTemplate;
+    const text = buildMsg(template, debt, inst);
+    const hasApi = settings.apiUrl && settings.instance && settings.apiKey;
+    if (hasApi) {
+      toast('Enviando via API...', 'info', 'WhatsApp');
+      const ok = await sendViaAPI(debt.phone, text, settings);
+      if (ok) { toast(`Mensagem enviada para ${debt.name}!`, 'success', 'Enviado ✓'); return; }
+    }
+    openWaMe(debt.phone, text);
+    toast('WhatsApp aberto! Clique em Enviar para confirmar.', 'success', 'WhatsApp pronto ✓');
+  }
+
+  // ── Settings ───────────────────────────────────────────────────────────
+  async function saveSettings() {
+    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify(settForm) });
+    if (r?.ok) {
+      const s = await r.json();
+      setSettings({ ...DEFAULT_SETTINGS, ...s });
+      toast('Configurações salvas!', 'success', 'Salvo ✓');
+    }
+  }
+  async function testWhatsApp() {
+    await saveSettings();
+    if (!settForm.apiUrl || !settForm.instance || !settForm.apiKey) {
+      toast('Preencha URL, instância e API Key', 'warning', 'Campos obrigatórios'); return;
+    }
+    const url = `${settForm.apiUrl.replace(/\/$/, '')}/instance/connectionState/${settForm.instance}`;
+    try {
+      const r    = await fetch(url, { headers: { apikey: settForm.apiKey } });
+      const data = await r.json();
+      const st   = data?.instance?.state || data?.state || 'open';
+      if (st === 'open') toast('WhatsApp conectado!', 'success', 'Conexão OK ✓');
+      else               toast(`Estado: ${st}`, 'warning', 'Atenção');
+    } catch { toast('Falha na conexão. Verifique a URL.', 'danger', 'Erro'); }
+  }
+  async function runSchedulerNow() {
+    toast('Verificando vencimentos...', 'info', 'Scheduler');
+    const r = await api('/api/cron/scheduler', { method: 'POST' });
+    if (r?.ok) { toast('Verificação concluída!', 'success', 'Scheduler'); fetchAll(); }
+  }
+  async function clearActivity() {
+    const r = await api('/api/activity', { method: 'DELETE' });
+    if (r?.ok) { fetchAll(); toast('Histórico limpo', 'success', 'Limpo'); }
+  }
+
+  // ── Export / Import ────────────────────────────────────────────────────
+  function exportData() {
+    const blob = new Blob([JSON.stringify({ debts, activity, settings }, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a'); a.href = url;
+    a.download = `debtflow-backup-${today}.json`; a.click();
+    URL.revokeObjectURL(url);
+    toast('Dados exportados!', 'success', 'Exportado');
+  }
+  function importData(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.debts || !Array.isArray(data.debts)) throw new Error('Formato inválido');
+        // Re-importar cada dívida
+        for (const d of data.debts) {
+          await api('/api/debts', { method: 'POST', body: JSON.stringify({
+            name: d.name, phone: d.phone, product: d.product, total: d.total,
+            installments: d.installments, dueDay: d.dueDay, interestRate: d.interestRate,
+            notes: d.notes, startDate: d.createdAt,
+          })});
+        }
+        fetchAll();
+        toast('Dados importados!', 'success', 'Importado');
+      } catch { toast('Arquivo inválido', 'danger', 'Erro'); }
+    };
+    reader.readAsText(file);
+  }
+  function confirmClearAll() {
+    setGcData({
+      title: 'Limpar todos os dados', style: 'danger',
+      msg: 'Tem certeza? <strong>Todas as dívidas e histórico</strong> serão apagados permanentemente.',
+      label: 'Limpar tudo',
+      fn: async () => {
+        await Promise.all(debts.map(d => api(`/api/debts/${d.id}`, { method: 'DELETE' })));
+        await api('/api/activity', { method: 'DELETE' });
+        fetchAll(); toast('Todos os dados foram removidos', 'warning', 'Dados limpos');
+      },
+    });
+    setGcModal(true);
+  }
+
+  // ── Logout ─────────────────────────────────────────────────────────────
+  async function logout() {
+    await fetch('/api/auth', { method: 'DELETE' });
+    router.push('/login');
+  }
+
+  // ── KPIs ───────────────────────────────────────────────────────────────
+  const thisMonth = today.slice(0, 7);
+  let totalOpen = 0, received = 0, overdueCount = 0, upcomingCount = 0;
+  debts.forEach(d => {
+    d.installmentList?.forEach(i => {
+      if (i.status === 'paid') {
+        if (i.paidDate?.startsWith(thisMonth)) received += i.value;
+      } else {
+        totalOpen += i.value;
+        const diff = daysDiff(today, i.dueDate);
+        if (diff < 0)            overdueCount++;
+        if (diff >= 0 && diff <= 5) upcomingCount++;
+      }
+    });
+  });
+
+  // ── Filtered debts ─────────────────────────────────────────────────────
+  const filteredDebts = debts.filter(d => {
+    const matchSearch = !search || d.name.toLowerCase().includes(search.toLowerCase()) || d.product.toLowerCase().includes(search.toLowerCase());
+    if (!matchSearch) return false;
+    if (filter === 'all')     return true;
+    if (filter === 'paid')    return d.status === 'paid';
+    if (filter === 'overdue') return d.status === 'overdue';
+    if (filter === 'pending') return d.status === 'pending';
+    if (filter === 'upcoming') {
+      const next = d.installmentList?.find(i => i.status !== 'paid');
+      if (!next) return false;
+      const diff = daysDiff(today, next.dueDate);
+      return diff >= 0 && diff <= 5;
+    }
+    return true;
+  });
+
+  // ── Calendar items ─────────────────────────────────────────────────────
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth();
+  const calItems = [];
+  debts.forEach(debt => {
+    debt.installmentList?.forEach((inst, idx) => {
+      if (inst.status === 'paid') return;
+      const d    = new Date(inst.dueDate + 'T00:00:00');
+      const diff = daysDiff(today, inst.dueDate);
+      if ((d.getFullYear() === year && d.getMonth() === month) || diff < 0) {
+        calItems.push({ debt, inst, idx });
+      }
+    });
+  });
+  calItems.sort((a, b) => a.inst.dueDate.localeCompare(b.inst.dueDate));
+
+  // ── Bar chart data ─────────────────────────────────────────────────────
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({
+      key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+      label: d.toLocaleString('pt-BR', { month: 'short' }),
+      value: 0,
+    });
+  }
+  debts.forEach(d => d.installmentList?.forEach(i => {
+    if (i.status === 'paid' && i.paidDate) {
+      const m = months.find(mo => i.paidDate.startsWith(mo.key));
+      if (m) m.value += i.value;
+    }
+  }));
+  const maxBar = Math.max(...months.map(m => m.value), 1);
+
+  // ════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ════════════════════════════════════════════════════════════════════
+  if (loading) return (
+    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg-base)' }}>
+      <div style={{ textAlign:'center' }}>
+        <div className="spinner" style={{ width:32, height:32, borderWidth:3, margin:'0 auto 12px' }}></div>
+        <div style={{ color:'var(--text-muted)', fontSize:14 }}>Carregando DebtFlow...</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="app-layout">
+
+      {/* ── SIDEBAR ─────────────────────────────────────────────── */}
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} id="sidebar">
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/>
+            </svg>
+          </div>
+          <div className="sidebar-logo-text">
+            <span className="sidebar-logo-title">DebtFlow</span>
+            <span className="sidebar-logo-subtitle">Gestão de Cobranças</span>
+          </div>
+        </div>
+        <nav className="sidebar-nav">
+          <span className="nav-section-label">Principal</span>
+          {[
+            { id:'dashboard', label:'Dashboard', icon: <><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></> },
+            { id:'debts',     label:'Dívidas',   icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></> },
+            { id:'calendar',  label:'Vencimentos',icon: <><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></> },
+            { id:'activity',  label:'Atividade', icon: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/> },
+          ].map(({ id, label, icon }) => (
+            <div key={id} className={`nav-item${page===id?' active':''}`} onClick={() => navigate(id)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icon}</svg>
+              {label}
+              {id === 'debts' && overdueCount > 0 && (
+                <span className="nav-badge">{overdueCount}</span>
+              )}
+            </div>
+          ))}
+          <span className="nav-section-label">Configuração</span>
+          <div className={`nav-item${page==='settings'?' active':''}`} onClick={() => navigate('settings')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            Configurações
+          </div>
+        </nav>
+        <div className="sidebar-footer">
+          <div className="sidebar-user" onClick={logout} title="Sair">
+            <div className="sidebar-avatar">A</div>
+            <div className="sidebar-user-info">
+              <div className="sidebar-user-name">{adminName}</div>
+              <div className="sidebar-user-role">Clique para sair</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── MAIN CONTENT ─────────────────────────────────────────── */}
+      <main className="main-content">
+        {/* Top Header */}
+        <header className="top-header">
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <button className="mobile-menu-btn" onClick={() => setSidebarOpen(o => !o)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
+            <div className="header-left">
+              <div className="header-title">{PAGE_META[page]?.title || ''}</div>
+              <div className="header-subtitle">{PAGE_META[page]?.subtitle || ''}</div>
+            </div>
+          </div>
+          <div className="header-actions">
+            <div className="header-search">
+              <svg className="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" placeholder="Buscar devedor..." value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <button className="btn btn-primary" onClick={openNewDebt}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Nova Dívida
+            </button>
+          </div>
+        </header>
+
+        <div className="page-content">
+
+          {/* ══ DASHBOARD ══════════════════════════════════════════ */}
+          {page === 'dashboard' && (
+            <section>
+              <div className="kpi-grid">
+                {[
+                  { label:'Total em Aberto', value:`R$ ${fmt(totalOpen)}`, cls:'primary', icon:<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></> },
+                  { label:'Recebido no Mês', value:`R$ ${fmt(received)}`,  cls:'accent',  icon:<><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></> },
+                  { label:'Inadimplentes',   value:overdueCount,           cls:'danger',  icon:<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></> },
+                  { label:'Vence em 5 dias', value:upcomingCount,          cls:'warning', icon:<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></> },
+                ].map(({ label, value, cls, icon }) => (
+                  <div key={label} className={`kpi-card ${cls}`}>
+                    <div className="kpi-header">
+                      <span className="kpi-label">{label}</span>
+                      <div className="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icon}</svg></div>
+                    </div>
+                    <div className="kpi-value currency">{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="dashboard-grid" style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:24 }}>
+                <div>
+                  <div className="section-header">
+                    <div><div className="section-title">Dívidas Recentes</div><div className="section-subtitle">Últimas movimentações</div></div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => navigate('debts')}>Ver todas</button>
+                  </div>
+                  <div className="table-container">
+                    <table className="data-table"><thead><tr><th>Devedor</th><th>Produto</th><th>Valor Total</th><th>Próx. Vencimento</th><th>Status</th></tr></thead>
+                      <tbody>
+                        {debts.slice(0, 6).length === 0 ? (
+                          <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>Nenhuma dívida cadastrada</td></tr>
+                        ) : debts.slice(0, 6).map(d => {
+                          const next = d.installmentList?.find(i => i.status !== 'paid');
+                          return (
+                            <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':''}>
+                              <td><div className="table-name"><div className="table-avatar" style={{ background: avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{d.phone}</div>}</div></div></td>
+                              <td>{d.product}</td>
+                              <td className="currency"><strong>R$ {fmt(d.total)}</strong></td>
+                              <td>{next ? fmtDate(next.dueDate) : '—'}</td>
+                              <td><StatusBadge debt={d} today={today} /></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div>
+                  <div className="section-header"><div><div className="section-title">Atividade Recente</div></div></div>
+                  <div className="table-container" style={{ padding:'8px 16px' }}>
+                    <ActivityList items={activity.slice(0, 5)} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Bar chart */}
+              <div style={{ marginTop:24 }}>
+                <div className="chart-container">
+                  <div className="section-title">Recebimentos — Últimos 6 Meses</div>
+                  <div className="simple-bar-chart">
+                    {months.map(m => (
+                      <div key={m.key} className="bar-wrap">
+                        <div className="bar" style={{ height: `${(m.value/maxBar)*100}%` }} title={`R$ ${fmt(m.value)}`}></div>
+                        <div className="bar-label">{m.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* ══ DÍVIDAS ════════════════════════════════════════════ */}
+          {page === 'debts' && (
+            <section>
+              <div className="filter-bar">
+                {[['all','Todas'],['pending','Pendentes'],['overdue','Em Atraso'],['upcoming','Vence em breve'],['paid','Liquidados']].map(([v,l]) => (
+                  <button key={v} className={`filter-pill${filter===v?' active':''}`} onClick={() => setFilter(v)}>{l}</button>
+                ))}
+              </div>
+              {/* ── Mobile: card list ── */}
+              <div className="mobile-only">
+                {filteredDebts.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                    <div className="empty-title">Nenhuma dívida encontrada</div>
+                    <div className="empty-subtitle">Toque no + para adicionar uma nova</div>
+                  </div>
+                ) : (
+                  <div className="debt-cards-list">
+                    {filteredDebts.map(d => {
+                      const paidN = d.installmentList?.filter(i => i.status==='paid').length || 0;
+                      const totalN = d.installmentList?.length || 0;
+                      const nextInst = d.installmentList?.find(i => i.status !== 'paid');
+                      const diff = nextInst ? daysDiff(today, nextInst.dueDate) : null;
+                      let cardCls = 'debt-mobile-card';
+                      if (diff !== null && diff < 0) cardCls += ' overdue';
+                      else if (diff !== null && diff <= 5) cardCls += ' warning';
+                      return (
+                        <div key={d.id} className={cardCls} onClick={() => setSideDebt(d)}>
+                          <div className="debt-mobile-card-top">
+                            <div className="table-avatar" style={{ background:avatarColor(d.name), width:44, height:44, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:17, fontWeight:800, color:'#fff', flexShrink:0 }}>
+                              {d.name[0]?.toUpperCase()}
+                            </div>
+                            <div className="debt-mobile-card-info">
+                              <div className="debt-mobile-card-name">{d.name}</div>
+                              <div className="debt-mobile-card-sub">{d.product}{d.phone && ` · ${d.phone}`}</div>
+                            </div>
+                            <StatusBadge debt={d} today={today} />
+                          </div>
+                          <div className="debt-mobile-card-mid">
+                            <div>
+                              <div className="debt-mobile-card-value">R$ {fmt(d.total)}</div>
+                              <div className="debt-mobile-card-inst">{paidN}/{totalN} parcelas · Dia {d.dueDay} · {d.interestRate}%a.m.</div>
+                            </div>
+                            {nextInst && (
+                              <div style={{fontSize:12,color:'var(--text-muted)',textAlign:'right'}}>
+                                <div>Próximo</div>
+                                <div style={{fontWeight:600,color:'var(--text-secondary)'}}>{fmtDate(nextInst.dueDate)}</div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="debt-mobile-card-actions" onClick={e => e.stopPropagation()}>
+                            {d.phone && nextInst && (
+                              <button className="btn btn-sm" style={{background:'#25D366',color:'#fff',border:'none',flex:'0 0 auto'}} onClick={() => sendWhatsApp(d, nextInst)}>
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" style={{marginRight:4}}><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                Cobrar
+                              </button>
+                            )}
+                            <button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={() => openEditDebt(d)}>Editar</button>
+                            <button className="btn btn-sm" style={{color:'var(--color-danger)',border:'1px solid rgba(255,71,87,.2)',background:'rgba(255,71,87,.06)',flex:'0 0 auto'}} onClick={() => { setDelDebt(d); setDelModal(true); }}>Excluir</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Desktop: tabela ── */}
+              <div className="table-container desktop-only">
+                {filteredDebts.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                    <div className="empty-title">Nenhuma dívida encontrada</div>
+                    <div className="empty-subtitle">Adicione uma nova dívida ou ajuste os filtros</div>
+                  </div>
+                ) : (
+                  <table className="data-table">
+                    <thead><tr><th>Devedor</th><th>Produto</th><th>Valor Total</th><th>Parcelas</th><th>Vencimento</th><th>Juros/mês</th><th>Status</th><th>Ações</th></tr></thead>
+                    <tbody>
+                      {filteredDebts.map(d => {
+                        const paid = d.installmentList?.filter(i => i.status==='paid').length || 0;
+                        const total = d.installmentList?.length || 0;
+                        return (
+                          <tr key={d.id} className={d.status==='overdue'?'row-overdue':''} onClick={() => setSideDebt(d)}>
+                            <td><div className="table-name"><div className="table-avatar" style={{ background:avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone&&<div style={{fontSize:11,color:'var(--text-muted)'}}>{d.phone}</div>}</div></div></td>
+                            <td>{d.product}</td>
+                            <td className="currency"><strong>R$ {fmt(d.total)}</strong></td>
+                            <td>
+                              <div style={{fontSize:13}}>{paid}/{total} pagas</div>
+                              <div className="progress-bar" style={{marginTop:6,width:80}}><div className="progress-fill" style={{width:`${total>0?(paid/total*100):0}%`}}></div></div>
+                            </td>
+                            <td>Dia {d.dueDay}</td>
+                            <td><span style={{color:'var(--color-warning)'}}>{d.interestRate}% a.m.</span></td>
+                            <td><StatusBadge debt={d} today={today} /></td>
+                            <td onClick={e => e.stopPropagation()}>
+                              <div style={{display:'flex',gap:6}}>
+                                <button className="btn btn-sm btn-ghost btn-icon" data-tooltip="Editar" onClick={() => openEditDebt(d)}>
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                </button>
+                                {d.phone && (
+                                  <a className="btn btn-sm btn-ghost btn-icon" href={`https://wa.me/${d.phone}`} target="_blank" rel="noopener" data-tooltip="WhatsApp" onClick={e => e.stopPropagation()}>
+                                    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                  </a>
+                                )}
+                                <button className="btn btn-sm btn-ghost btn-icon" data-tooltip="Excluir" style={{color:'var(--color-danger)'}} onClick={() => { setDelDebt(d); setDelModal(true); }}>
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ══ VENCIMENTOS ════════════════════════════════════════ */}
+          {page === 'calendar' && (
+            <section>
+              <div className="section-header">
+                <div>
+                  <div className="section-title">Vencimentos do Mês</div>
+                  <div className="section-subtitle">{new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'}).replace(/^\w/, c => c.toUpperCase())}</div>
+                </div>
+              </div>
+              {calItems.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                  <div className="empty-title">Sem vencimentos este mês</div>
+                  <div className="empty-subtitle">Todas as parcelas deste mês foram pagas</div>
+                </div>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  {calItems.map(({ debt, inst, idx }) => {
+                    const diff = daysDiff(today, inst.dueDate);
+                    const d    = new Date(inst.dueDate + 'T00:00:00');
+                    let cls = '', diffLabel = null;
+                    if (diff < 0)        { cls = 'row-overdue'; diffLabel = <span style={{color:'var(--color-danger)',fontSize:11}}>{Math.abs(diff)} dias atrasado</span>; }
+                    else if (diff === 0) { cls = 'row-warning'; diffLabel = <span style={{color:'var(--color-warning)',fontSize:11}}>Vence hoje</span>; }
+                    else if (diff <= 5)  { cls = 'row-warning'; diffLabel = <span style={{color:'var(--color-warning)',fontSize:11}}>Em {diff} dia(s)</span>; }
+                    else                 { diffLabel = <span style={{color:'var(--text-muted)',fontSize:11}}>Em {diff} dias</span>; }
+                    return (
+                      <div key={`${debt.id}-${idx}`} className={`table-container ${cls}`} style={{padding:'16px 20px',cursor:'pointer'}} onClick={() => setSideDebt(debt)}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+                          <div style={{display:'flex',alignItems:'center',gap:14}}>
+                            <div style={{textAlign:'center',minWidth:42}}>
+                              <div style={{fontSize:22,fontWeight:800,color:'var(--text-primary)',lineHeight:1}}>{d.getDate()}</div>
+                              <div style={{fontSize:10,color:'var(--text-muted)',textTransform:'uppercase'}}>{d.toLocaleString('pt-BR',{weekday:'short'})}</div>
+                            </div>
+                            <div style={{width:1,height:40,background:'var(--border-subtle)'}}></div>
+                            <div>
+                              <div style={{fontWeight:600}}>{debt.name}</div>
+                              <div style={{fontSize:12,color:'var(--text-muted)'}}>{debt.product} — Parcela {inst.number}/{debt.installments}</div>
+                              <div style={{marginTop:2}}>{diffLabel}</div>
+                            </div>
+                          </div>
+                          <div style={{display:'flex',alignItems:'center',gap:12}}>
+                            <div style={{textAlign:'right'}}>
+                              <div style={{fontSize:18,fontWeight:700}} className="currency">R$ {fmt(inst.value)}</div>
+                              {inst.isPenalty && <div style={{fontSize:11,color:'var(--color-warning)'}}>+{inst.penaltyRate}% juros</div>}
+                            </div>
+                            <div style={{display:'flex',gap:8}} onClick={e => e.stopPropagation()}>
+                              {debt.phone && (
+                                <button className="btn btn-sm" style={{background:'#25D366',color:'#fff',border:'none'}} onClick={() => sendWhatsApp(debt, inst)}>
+                                  <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                  Cobrar
+                                </button>
+                              )}
+                              <button className="btn btn-accent btn-sm" onClick={() => openPayModal(debt, inst, idx)}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14,marginRight:4}}><polyline points="20 6 9 17 4 12"/></svg>
+                                Pagar
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* ══ ATIVIDADE ══════════════════════════════════════════ */}
+          {page === 'activity' && (
+            <section>
+              <div className="section-header">
+                <div><div className="section-title">Histórico de Atividades</div><div className="section-subtitle">Todos os eventos registrados</div></div>
+                <button className="btn btn-ghost btn-sm" onClick={clearActivity}>Limpar histórico</button>
+              </div>
+              <div className="table-container" style={{ padding:'8px 24px' }}>
+                <ActivityList items={activity} />
+              </div>
+            </section>
+          )}
+
+          {/* ══ CONFIGURAÇÕES ══════════════════════════════════════ */}
+          {page === 'settings' && (
+            <section>
+              {/* WhatsApp */}
+              <div className="settings-card">
+                <div className="settings-card-title">
+                  <svg viewBox="0 0 24 24" fill="currentColor" style={{width:16,height:16,color:'#25D366'}}><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  WhatsApp — Evolution API <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>(opcional)</span>
+                </div>
+                <div className="settings-card-subtitle">Sem API configurada, o botão "Cobrar" abre o WhatsApp com a mensagem pronta — 100% gratuito.</div>
+                <div className="form-grid">
+                  {[['apiUrl','URL da API','https://sua-api.com','url'],['instance','Nome da Instância','minha-instancia','text'],['apiKey','API Key','••••••••••••••••','password']].map(([k,l,ph,t]) => (
+                    <div className="form-group" key={k}>
+                      <label className="form-label">{l}</label>
+                      <input className="form-control" type={t} placeholder={ph} value={settForm[k]||''} onChange={e => setSettForm(s=>({...s,[k]:e.target.value}))} />
+                    </div>
+                  ))}
+                  <div className="form-group">
+                    <label className="form-label">Juros Padrão (%/mês)</label>
+                    <input className="form-control" type="number" min="0" max="100" step="0.1" value={settForm.defaultInterest||2} onChange={e => setSettForm(s=>({...s,defaultInterest:parseFloat(e.target.value)}))} />
+                  </div>
+                </div>
+                <div className="settings-divider"></div>
+                {[['msgTemplate','Template de Cobrança'],['msgOverdue','Template de Atraso']].map(([k,l]) => (
+                  <div className="form-group" key={k} style={{marginBottom:16}}>
+                    <label className="form-label">{l}</label>
+                    <textarea className="form-control" rows={4} value={settForm[k]||''} onChange={e => setSettForm(s=>({...s,[k]:e.target.value}))} />
+                    <span className="form-hint">Variáveis: {'{nome}'}, {'{valor}'}, {'{vencimento}'}, {'{produto}'}, {'{parcela}'}, {'{total_parcelas}'}{k==='msgOverdue'?`, {'{valor_com_juros}'}, {'{dias_atraso}'}`:''}  </span>
+                  </div>
+                ))}
+                <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+                  <button className="btn btn-primary" onClick={saveSettings}>Salvar Configurações</button>
+                  <button className="btn btn-ghost" onClick={testWhatsApp}>Testar Conexão API</button>
+                </div>
+              </div>
+
+              {/* Scheduler */}
+              <div className="settings-card">
+                <div className="settings-card-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:16,height:16}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  Agendamento Automático
+                </div>
+                <div className="settings-card-subtitle">Cron Job no Vercel — executa a cada hora, mesmo com o site fechado</div>
+                {[['Intervalo','A cada 1 hora (Vercel Cron)'],['Cobrança','No dia do vencimento'],['Juros','5 dias após vencimento']].map(([l,v]) => (
+                  <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value">{v}</span></div>
+                ))}
+                <div style={{marginTop:16}}>
+                  <button className="btn btn-ghost btn-sm" onClick={runSchedulerNow}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.18"/></svg>
+                    Verificar agora
+                  </button>
+                </div>
+              </div>
+
+              {/* Dados */}
+              <div className="settings-card">
+                <div className="settings-card-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:16,height:16}}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  Dados do Sistema
+                </div>
+                <div className="settings-card-subtitle">Exportar backup ou importar dados</div>
+                <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+                  <button className="btn btn-ghost btn-sm" onClick={exportData}>Exportar JSON</button>
+                  <label className="btn btn-ghost btn-sm" style={{cursor:'pointer'}}>
+                    Importar JSON
+                    <input type="file" accept=".json" onChange={importData} style={{display:'none'}} />
+                  </label>
+                  <button className="btn btn-danger btn-sm" onClick={confirmClearAll}>Limpar tudo</button>
+                </div>
+              </div>
+            </section>
+          )}
+
+        </div>
+      </main>
+
+      {/* ── BOTTOM NAV (mobile) ──────────────────────────────────── */}
+      <BottomNav page={page} navigate={navigate} overdueCount={overdueCount} />
+
+      {/* ── FAB: Nova Dívida (mobile) ─────────────────────────────── */}
+      <button className="fab" onClick={openNewDebt} aria-label="Nova Dívida">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </button>
+
+      {/* ── SIDE PANEL: Detalhe da Dívida ─────────────────────── */}
+      <div className={`side-panel-backdrop${sideDebt?' open':''}`} onClick={e => { if (e.target === e.currentTarget) setSideDebt(null); }}>
+        <div className="side-panel">
+          {sideDebt && <DebtPanel debt={sideDebt} today={today} onClose={() => setSideDebt(null)} onEdit={d => { setSideDebt(null); setTimeout(()=>openEditDebt(d),300); }} onPay={openPayModal} onDelete={d => { setSideDebt(null); setDelDebt(d); setDelModal(true); }} onWhatsApp={sendWhatsApp} />}
+        </div>
+      </div>
+
+      {/* ── MODAL: Nova / Editar Dívida ─────────────────────────── */}
+      <Modal open={debtModal} onClose={() => setDebtModal(false)} title={editId ? 'Editar Dívida' : 'Nova Dívida'} subtitle="Preencha os dados do devedor e da dívida" maxWidth={640}>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="form-label">Nome do Devedor <span>*</span></label>
+            <input className="form-control" type="text" placeholder="João Silva" value={debtForm.name||''} onChange={e=>setDebtForm(f=>({...f,name:e.target.value}))} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">WhatsApp</label>
+            <input className="form-control" type="tel" placeholder="5511999999999" value={debtForm.phone||''} onChange={e=>setDebtForm(f=>({...f,phone:e.target.value}))} />
+          </div>
+          <div className="form-group full-width">
+            <label className="form-label">Endereço</label>
+            <input className="form-control" type="text" placeholder="Rua das Flores, 123 — Bairro, Cidade/UF" value={debtForm.address||''} onChange={e=>setDebtForm(f=>({...f,address:e.target.value}))} />
+          </div>
+          <div className="form-group full-width">
+            <label className="form-label">Produto / Serviço <span>*</span></label>
+            <input className="form-control" type="text" placeholder="Ex: Notebook Dell, Serviço de Design..." value={debtForm.product||''} onChange={e=>setDebtForm(f=>({...f,product:e.target.value}))} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Valor Total <span>*</span></label>
+            <div className="input-prefix-wrapper"><span className="input-prefix">R$</span>
+              <input className="form-control" type="number" min="0.01" step="0.01" placeholder="0,00" value={debtForm.total||''} onChange={e=>setDebtForm(f=>({...f,total:e.target.value}))} />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Número de Parcelas <span>*</span></label>
+            <input className="form-control" type="number" min="1" max="360" placeholder="1" value={debtForm.installments||''} onChange={e=>setDebtForm(f=>({...f,installments:e.target.value}))} />
+          </div>
+          {!editId && (
+            <div className="form-group">
+              <label className="form-label">Parcelas já pagas</label>
+              <input
+                className="form-control" type="number" min="0"
+                placeholder="0"
+                value={debtForm.paidInstallments||''}
+                onChange={e=>setDebtForm(f=>({...f,paidInstallments:e.target.value}))}
+              />
+              <span className="form-hint">As primeiras N parcelas serão marcadas como pagas automaticamente</span>
+            </div>
+          )}
+          <div className="form-group">
+            <label className="form-label">Dia de Vencimento <span>*</span></label>
+            <input className="form-control" type="number" min="1" max="28" placeholder="10" value={debtForm.dueDay||''} onChange={e=>setDebtForm(f=>({...f,dueDay:e.target.value}))} />
+            <span className="form-hint">Entre 1 e 28</span>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Juros por Atraso (%/mês)</label>
+            <input className="form-control" type="number" min="0" max="100" step="0.1" value={debtForm.interestRate??10} onChange={e=>setDebtForm(f=>({...f,interestRate:e.target.value}))} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Data de Início <span>*</span></label>
+            <input className="form-control" type="date" value={debtForm.startDate||''} onChange={e=>setDebtForm(f=>({...f,startDate:e.target.value}))} />
+          </div>
+          <div className="form-group full-width">
+            <label className="form-label">Observações</label>
+            <textarea className="form-control" rows={2} placeholder="Notas adicionais..." value={debtForm.notes||''} onChange={e=>setDebtForm(f=>({...f,notes:e.target.value}))} />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={() => setDebtModal(false)}>Cancelar</button>
+          <button className="btn btn-primary" onClick={saveDebt}>{editId ? 'Salvar Alterações' : 'Salvar Dívida'}</button>
+        </div>
+      </Modal>
+
+      {/* ── MODAL: Pagamento ─────────────────────────────────────── */}
+      <Modal open={payModal} onClose={() => setPayModal(false)} title="Registrar Pagamento" subtitle="Confirme o pagamento da parcela" maxWidth={420}>
+        {payInfo.inst && <>
+          {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
+            <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value currency">{v}</span></div>
+          ))}
+          <div className="form-group" style={{marginTop:16}}>
+            <label className="form-label">Data do Pagamento</label>
+            <input className="form-control" type="date" value={payInfo.date} onChange={e=>setPayInfo(p=>({...p,date:e.target.value}))} />
+          </div>
+        </>}
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={() => setPayModal(false)}>Cancelar</button>
+          <button className="btn btn-accent" onClick={confirmPayment}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Confirmar Pagamento
+          </button>
+        </div>
+      </Modal>
+
+      {/* ── MODAL: Excluir Dívida ─────────────────────────────────── */}
+      <Modal open={delModal} onClose={() => setDelModal(false)} title="Excluir Dívida" titleStyle={{ color:'var(--color-danger)' }} subtitle="Esta ação não pode ser desfeita" maxWidth={420}>
+        <p style={{color:'var(--text-secondary)',fontSize:14,lineHeight:1.6}}>
+          Tem certeza que deseja excluir a dívida de <strong style={{color:'var(--text-primary)'}}>{delDebt?.name}</strong>?
+          Todo o histórico de parcelas será removido permanentemente.
+        </p>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={() => setDelModal(false)}>Cancelar</button>
+          <button className="btn btn-danger" onClick={() => delDebt && deleteDebt(delDebt)}>Excluir Definitivamente</button>
+        </div>
+      </Modal>
+
+      {/* ── MODAL: Confirmação genérica ──────────────────────────── */}
+      <Modal open={gcModal} onClose={() => setGcModal(false)} title={gcData.title} maxWidth={420}>
+        <p style={{color:'var(--text-secondary)',fontSize:14,lineHeight:1.6}} dangerouslySetInnerHTML={{ __html: gcData.msg }} />
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={() => setGcModal(false)}>Cancelar</button>
+          <button className={`btn btn-${gcData.style}`} onClick={() => { setGcModal(false); gcData.fn?.(); }}>{gcData.label}</button>
+        </div>
+      </Modal>
+
+      {/* ── TOASTS ───────────────────────────────────────────────── */}
+      <div className="toast-container">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast ${t.type}`}>
+            <svg className="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {t.type==='success' && <polyline points="20 6 9 17 4 12"/>}
+              {t.type==='danger'  && <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>}
+              {t.type==='warning' && <><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>}
+              {t.type==='info'    && <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="8"/><line x1="12" y1="12" x2="12" y2="16"/></>}
+            </svg>
+            <div className="toast-text">
+              {t.title && <div className="toast-title">{t.title}</div>}
+              <div className="toast-body">{t.msg}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+    </div>
+  );
+}
+
+// ── Sub-componentes ──────────────────────────────────────────────────────
+
+function BottomNav({ page, navigate, overdueCount }) {
+  const items = [
+    {
+      id: 'dashboard', label: 'Início',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" hei      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
+    },
+    {
+      id: 'debts', label: 'Dívidas',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
+      badge: overdueCount,
+    },
+    {
+      id: 'calendar', label: 'Agenda',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+    },
+    {
+      id: 'activity', label: 'Histórico',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+    },
+    {
+      id: 'settings', label: 'Config',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+    },
+  ];
+  return (
+    <nav className="bottom-nav">
+      {items.map(({ id, label, icon, badge }) => (
+        <button key={id} className={`bottom-nav-item${page===id?' active':''}`} onClick={() => navigate(id)}>
+          {icon}
+          {badge > 0 && <span className="bottom-nav-badge">{badge > 9 ? '9+' : badge}</span>}
+          <span className="bottom-nav-label">{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function Modal({ open, onClose, title, titleStyle, subtitle, children, maxWidth = 640 }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+  return (
+    <div className={`modal-backdrop${open?' open':''}`} onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth }}>
+        <div className="modal-header">
+          <div>
+            <div className="modal-title" style={titleStyle}>{title}</div>
+            {subtitle && <div className="modal-subtitle">{subtitle}</div>}
+          </div>
+          <button className="modal-close" onClick={onClose}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ActivityList({ items }) {
+  if (!items || items.length === 0) return <div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:13}}>Nenhuma atividade registrada</div>;
+  return (
+    <div className="activity-list">
+      {items.map((act, i) => (
+        <div key={act.id || i} className="activity-item">
+          <div className="activity-dot" style={{ background: act.type==='success'?'var(--color-success)':act.type==='warning'?'var(--color-warning)':act.type==='danger'?'var(--color-danger)':'var(--color-primary)' }}></div>
+          <div className="activity-content">
+            <div className="activity-text" dangerouslySetInnerHTML={{ __html: act.text }} />
+            <div className="activity-time">{act.ts ? new Date(act.ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : ''}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }) {
+  const paid     = debt.installmentList?.filter(i=>i.status==='paid').length||0;
+  const total    = debt.installmentList?.length||0;
+  const paidAmt  = debt.installmentList?.filter(i=>i.status==='paid').reduce((s,i)=>s+i.value,0)||0;
+  const openAmt  = debt.installmentList?.filter(i=>i.status!=='paid').reduce((s,i)=>s+i.value,0)||0;
+  const progress = total>0?(paid/total*100):0;
+
+  function fmt(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function fmtDate(s) { if(!s) return '—'; const[y,m,d]=s.split('-'); return `${d}/${m}/${y}`; }
+
+  const firstPending = debt.installmentList?.find(i=>i.status!=='paid');
+
+  return (
+    <>
+      <div className="side-panel-header">
+        <div>
+          <div className="modal-title">{debt.name}</div>
+          <div className="modal-subtitle">{debt.product}</div>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <button className="btn btn-sm btn-ghost" onClick={() => onEdit(debt)}>Editar</button>
+          <button className="modal-close" onClick={onClose}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div className="side-panel-body">
+        {/* Info card */}
+        <div className="settings-card" style={{marginBottom:16}}>
+          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
+            <div className="table-avatar" style={{width:48,height:48,borderRadius:'50%',background:'var(--color-primary)',fontSize:20,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>{debt.name[0]?.toUpperCase()}</div>
+            <div>
+              <div style={{fontWeight:700,fontSize:16}}>{debt.name}</div>
+              {debt.phone && <div style={{fontSize:13,color:'var(--text-muted)'}}>{debt.phone}</div>}
+              {debt.address && <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{debt.address}</div>}
+            </div>
+          </div>
+          {[['Produto',debt.product],['Valor Total',`R$ ${fmt(debt.total)}`],['Parcelas',`${paid}/${total} pagas`],['Dia de Vencimento',`Dia ${debt.dueDay}`],['Juros por Atraso',`${debt.interestRate}% a.m.`],['Pago',`R$ ${fmt(paidAmt)}`],['Em Aberto',`R$ ${fmt(openAmt)}`]].map(([l,v]) => (
+            <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value currency">{v}</span></div>
+          ))}
+          {debt.notes && <div style={{marginTop:12,padding:'10px 12px',background:'var(--bg-base)',borderRadius:8,fontSize:13,color:'var(--text-secondary)'}}>{debt.notes}</div>}
+          <div style={{marginTop:14}}>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:6}}><span>Progresso</span><span>{progress.toFixed(0)}%</span></div>
+            <div className="progress-bar" style={{height:8}}><div className="progress-fill" style={{width:`${progress}%`}}></div></div>
+          </div>
+        </div>
+
+        {/* Quick actions */}
+        <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+          {firstPending && debt.phone && (
+            <button className="btn btn-sm" style={{background:'#25D366',color:'#fff',border:'none'}} onClick={() => onWhatsApp(debt, firstPending)}>
+              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              Cobrar via WhatsApp
+            </button>
+          )}
+          <button className="btn btn-sm btn-danger" onClick={() => onDelete(debt)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+            Excluir
+          </button>
+        </div>
+
+        {/* Installment list */}
+        <div className="section-title" style={{marginBottom:10}}>Parcelas</div>
+        {debt.installmentList?.map((inst, idx) => {
+          const diff = inst.status !== 'paid' ? daysDiff(today, inst.dueDate) : null;
+          let rowCls = '';
+          if (inst.status === 'paid') rowCls = 'row-paid';
+          else if (diff !== null && diff < 0) rowCls = 'row-overdue';
+          else if (diff !== null && diff <= 5) rowCls = 'row-warning';
+          return (
+            <div key={idx} className={`table-container ${rowCls}`} style={{padding:'12px 16px',marginBottom:8,cursor:inst.status==='pending'?'pointer':'default'}} onClick={() => inst.status==='pending' && onPay(debt, inst, idx)}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <div style={{width:28,height:28,borderRadius:'50%',background:inst.status==='paid'?'var(--color-success)':diff<0?'var(--color-danger)':'var(--bg-tertiary)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:inst.status==='paid'||diff<0?'#fff':'var(--text-muted)',flexShrink:0}}>
+                    {inst.status==='paid'?'✓':inst.number}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600}}>Parcela {inst.number}/{total}</div>
+                    <div style={{fontSize:11,color:'var(--text-muted)'}}>
+                      {inst.status==='paid' ? `Pago em ${fmtDate(inst.paidDate)}` : `Vence ${fmtDate(inst.dueDate)}`}
+                      {inst.isPenalty && <span style={{color:'var(--color-warning)',marginLeft:6}}>+juros</span>}
+                    </div>
+                  </div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:14,fontWeight:700}} className="currency">R$ {fmt(inst.value)}</div>
+                  {inst.status==='pending' && <div style={{fontSize:10,color:'var(--color-primary)',marginTop:2}}>Toque p/ pagar</div>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+        

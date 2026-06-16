@@ -1,0 +1,26 @@
+{
+  "name": "debtflow-admin",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "next": "^15.3.0",
+    "react": "^19",
+    "react-dom": "^19",
+    "mongoose": "^8.5.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.6.3"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "eslint-config-next": "^15.3.0"
+  }
+}
