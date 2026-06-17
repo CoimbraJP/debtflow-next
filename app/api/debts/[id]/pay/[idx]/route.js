@@ -30,20 +30,15 @@ export async function POST(request, { params }) {
   inst.paidAmount = payAmount;
 
   // Se pagamento parcial, adiciona saldo restante + juros à próxima parcela
-  // Fórmula: saldo = (valorDevido - valorPago); carry = saldo * (1 + taxa/100)
-  // Ex: R$100 - R$40 = R$60 saldo; 10% de juros sobre R$60 = R$6; total carry = R$66
-  // O juro é calculado SOMENTE sobre o saldo restante, não sobre o valor cheio.
   if (isPartial) {
     const remainder    = dueValue - payAmount;
     const interestRate = parseFloat(debt.interestRate) || 0;
     const carry        = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));
 
-    // Previne re-processamento pelo scheduler
-    inst.dueSent      = true;
-    inst.overdueSent  = true;
+    inst.dueSent        = true;
+    inst.overdueSent    = true;
     inst.penaltyApplied = true;
 
-    // Encontra a próxima parcela ainda em aberto
     const nextInst = debt.installmentList.find((p, j) => j > i && !['paid', 'partial', 'skipped'].includes(p.status));
     if (nextInst) {
       nextInst.value     = parseFloat(nextInst.value) + carry;
@@ -61,4 +56,17 @@ export async function POST(request, { params }) {
       type: 'success',
     });
   } else {
-    const hasOverdu
+    const hasOverdue = debt.installmentList.some(p => p.status === 'overdue' || p.status === 'skipped');
+    debt.status = hasOverdue ? 'overdue' : 'pending';
+    const remainder    = dueValue - payAmount;
+    const interestRate = parseFloat(debt.interestRate) || 0;
+    const carry        = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));
+    const desc = isPartial
+      ? `💰 Pagamento parcial: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} · Pago: R$ ${payAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · Saldo transferido (c/ juros): R$ ${carry.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+      : `💰 Pagamento registrado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (R$ ${dueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+    await Activity.create({ tenant, text: desc, type: 'success' });
+  }
+
+  await debt.save();
+  return NextResponse.json(debt.toJSON());
+}

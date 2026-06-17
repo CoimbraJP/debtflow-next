@@ -37,7 +37,6 @@ export async function PUT(request, { params }) {
   const { name, phone, address, product, total, installments, dueDay, interestRate, notes, startDate } = body;
 
   // Normaliza createdAt para YYYY-MM-DD antes de comparar
-  // (Mongoose devolve Date object; comparação estrita com string sempre falhava)
   const dbCreatedAt = String(debt.createdAt || '').slice(0, 10);
   const needsRegen = (
     debt.total        !== parseFloat(total)        ||
@@ -68,9 +67,7 @@ export async function PUT(request, { params }) {
   debt.createdAt    = startDate;
 
   if (needsRegen) {
-    // Garante que createdAt é passado como string YYYY-MM-DD para generateInstallments
-    // Usa startDate do body (já normalizado para YYYY-MM-DD em openEditDebt)
-    // NÃO usa debt.createdAt pois Mongoose o coerce para Date object
+    // Usa startDate do body diretamente — NÃO usa debt.createdAt (Mongoose coerce para Date)
     const createdAtStr = String(startDate || dbCreatedAt || '').slice(0, 10);
     const newList = generateInstallments({
       total: debt.total, installments: debt.installments,
@@ -80,12 +77,12 @@ export async function PUT(request, { params }) {
     newList.forEach(inst => {
       if (paidByNum[inst.number]) {
         const p = paidByNum[inst.number];
-        inst.status      = p.status;
-        inst.paidDate    = p.paidDate;
-        inst.paidAmount  = p.paidAmount || null;
+        inst.status         = p.status;
+        inst.paidDate       = p.paidDate;
+        inst.paidAmount     = p.paidAmount || null;
         inst.penaltyApplied = true;
-        inst.dueSent     = true;
-        inst.overdueSent = true;
+        inst.dueSent        = true;
+        inst.overdueSent    = true;
       }
     });
     debt.installmentList = newList;
@@ -99,4 +96,33 @@ export async function PUT(request, { params }) {
 
   // Recalcula status geral
   const allSettled = debt.installmentList.every(i => ['paid', 'partial', 'skipped'].includes(i.status));
-  const hasOverdue  = debt.installmentList.some(i => i.status === 'over
+  const hasOverdue  = debt.installmentList.some(i => i.status === 'overdue' || i.status === 'skipped');
+  debt.status = allSettled ? 'paid' : hasOverdue ? 'overdue' : 'pending';
+
+  await debt.save();
+  await Activity.create({
+    tenant,
+    text: `✏️ Dívida atualizada: <strong>${name}</strong> — ${product}`,
+    type: 'info',
+  });
+
+  return NextResponse.json(debt.toJSON());
+}
+
+// DELETE /api/debts/:id — Remover dívida
+export async function DELETE(request, { params }) {
+  await connectDB();
+  const tenant = request.headers.get('x-tenant') || 'default';
+  const { id } = await params;
+
+  const debt = await Debt.findOneAndDelete({ _id: id, tenant });
+  if (!debt) return NextResponse.json({ error: 'Dívida não encontrada' }, { status: 404 });
+
+  await Activity.create({
+    tenant,
+    text: `🗑️ Dívida removida: <strong>${debt.name}</strong>`,
+    type: 'warning',
+  });
+
+  return NextResponse.json({ ok: true });
+}

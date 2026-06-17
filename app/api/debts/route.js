@@ -12,10 +12,9 @@ function generateInstallments(debt, paidCount = 0) {
     const dueDate = new Date(startDate);
     dueDate.setUTCMonth(startDate.getUTCMonth() + i);
     dueDate.setUTCDate(debt.dueDay);
-    // Se o dia transbordar (ex: 30 fev), vai para o último dia do mês
     if (dueDate.getUTCDate() !== debt.dueDay) dueDate.setUTCDate(0);
 
-    const dueDateStr = dueDate.toISOString().slice(0, 10);
+    const dueDateStr  = dueDate.toISOString().slice(0, 10);
     const alreadyPaid = i < paidCount;
 
     list.push({
@@ -58,15 +57,15 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
   }
   if (!phone || !String(phone).trim()) {
-    return NextResponse.json({ error: 'Número de WhatsApp é obrigatório' }, { status: 400 });
+    return NextResponse.json({ error: 'Numero de WhatsApp e obrigatorio' }, { status: 400 });
   }
   if (dueDay < 1 || dueDay > 28) {
     return NextResponse.json({ error: 'Dia de vencimento deve ser entre 1 e 28' }, { status: 400 });
   }
 
-  const paidCount  = Math.min(parseInt(paidInstallments) || 0, parseInt(installments));
-  const totalInst  = parseInt(installments);
-  const debtData = {
+  const paidCount = Math.min(parseInt(paidInstallments) || 0, parseInt(installments));
+  const totalInst = parseInt(installments);
+  const debtData  = {
     tenant,
     name, phone: phone || '', address: address || '', product,
     total:        parseFloat(total),
@@ -83,7 +82,12 @@ export async function POST(request) {
 
   const debt = await Debt.create(debtData);
 
-  const paidLabel = paidCount > 0 ? ` (${paidCount} parcelas já pagas)` : '';
+  const paidLabel = paidCount > 0 ? ` (${paidCount} parcelas ja pagas)` : '';
   await Activity.create({
     tenant,
-    text: `➕ Nova dívida: <strong>${name}</strong> — ${product} (R$ ${Number(total).toLocaleString(
+    text: `Nova divida: <strong>${name}</strong> - ${product} (R$ ${Number(total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})${paidLabel}`,
+    type: 'info',
+  });
+
+  return NextResponse.json(debt.toJSON(), { status: 201 });
+}
