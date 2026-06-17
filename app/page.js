@@ -485,10 +485,14 @@ export default function App() {
           </div>
           <div className="header-actions">
             <div className="header-search">
-              <svg className="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg className="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{cursor: search.trim() ? 'pointer' : 'default'}}
+                onClick={() => { if (search.trim()) setPage('debts'); }}>
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              <input type="text" placeholder="Buscar devedor..." value={search} onChange={e => setSearch(e.target.value)} />
+              <input type="text" placeholder="Buscar devedor..." value={search}
+                onChange={e => setSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && search.trim()) setPage('debts'); }} />
             </div>
             <button className="btn btn-primary" onClick={openNewDebt}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1004,9 +1008,12 @@ export default function App() {
           ))}
           <div className="form-group" style={{marginTop:16}}>
             <label className="form-label">Valor Pago</label>
-            <input className="form-control" type="number" step="0.01" min="0.01"
-              value={payInfo.payAmount ?? ''}
-              onChange={e => setPayInfo(p => ({...p, payAmount: e.target.value}))} />
+            <div className="input-prefix-wrapper">
+              <span className="input-prefix">R$</span>
+              <input className="form-control" type="number" step="0.01" min="0.01"
+                value={payInfo.payAmount ?? ''}
+                onChange={e => setPayInfo(p => ({...p, payAmount: e.target.value}))} />
+            </div>
             {parseFloat(payInfo.payAmount) < parseFloat(payInfo.inst?.value) - 0.009 && parseFloat(payInfo.payAmount) > 0 && (
               <span className="form-hint" style={{color:'var(--color-warning)',marginTop:6,display:'block'}}>
                 ⚠️ Pagamento parcial: saldo restante de R$ {fmt(payInfo.inst.value - parseFloat(payInfo.payAmount))} terá juros de {payInfo.debt?.interestRate ?? 0}% e será somado à próxima parcela.

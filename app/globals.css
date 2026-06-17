@@ -2014,6 +2014,7 @@ select.form-control option {
   .kpi-value            { font-size: 22px !important; }
   .debt-mobile-card-value { font-size: 19px !important; }
 }
+@media (max-width: 768px) {
   .side-panel::before {
     content: '';
     display: block; width: 40px; height: 4px;
@@ -2079,6 +2080,7 @@ select.form-control option {
 
   /* Dashboard 2-col grid → 1 col */
   .dashboard-grid { display: flex !important; flex-direction: column !important; gap: 16px; }
+}
 
 /* Phones muito pequenos ≤ 375px */
 @media (max-width: 375px) {
@@ -2103,9 +2105,6 @@ select.form-control option {
     min-width: 0;
     max-width: 100vw;
   }
-  /* Esconde busca e botão do header no mobile */
-  .header-search { display: none !important; }
-  .header-actions .btn { display: none !important; }
   /* Garante que tabelas não causem overflow horizontal */
   .table-container {
     overflow-x: auto;
