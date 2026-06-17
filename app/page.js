@@ -1271,9 +1271,8 @@ export default function App() {
               const _rate = parseFloat(d.interestRate) || 0;
               let juros = 0;
               if (inst.status === 'partial') {
-                // Juro sobre o saldo que será transferido para a próxima parcela
-                const _saldo = Math.max(0, (inst.value||0) - (inst.paidAmount||0));
-                juros = parseFloat((_saldo * _rate / 100).toFixed(2));
+                // Juros ainda não recebidos — ficam pendentes na próxima parcela (carry)
+                juros = 0;
               } else if (inst.status === 'paid') {
                 if (inst.penaltyApplied && inst.penaltyRate > 0) {
                   // Multa do scheduler (5+ dias de atraso)

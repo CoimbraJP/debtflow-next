@@ -68,9 +68,9 @@ describe('2. Pagamento Parcial', () => {
     assert.equal(parseFloat((1070 + carry).toFixed(2)), 2170);
   });
 
-  test('KPI juros mensais (partial) = juro sobre saldo', () => {
+  test('KPI juros mensais (partial) = 0 (juros ficam para a proxima parcela)', () => {
     const list = [mkInst({ status: 'partial', value: 1070, paidAmount: 70 })];
-    assert.equal(calcKpiJurosMensais(list, 0, 10), 100);
+    assert.equal(calcKpiJurosMensais(list, 0, 10), 0);
   });
 
   test('jurosJaPagos = juro sobre saldo', () => {
