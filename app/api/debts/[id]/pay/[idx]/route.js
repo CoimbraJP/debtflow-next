@@ -61,17 +61,4 @@ export async function POST(request, { params }) {
       type: 'success',
     });
   } else {
-    const hasOverdue = debt.installmentList.some(p => p.status === 'overdue' || p.status === 'skipped');
-    debt.status = hasOverdue ? 'overdue' : 'pending';
-    const remainder = dueValue - payAmount;
-    const interestRate = parseFloat(debt.interestRate) || 0;
-    const carry = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));
-    const desc = isPartial
-      ? `💰 Pagamento parcial: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} · Pago: R$ ${payAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · Saldo transferido (c/ juros): R$ ${carry.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-      : `💰 Pagamento registrado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (R$ ${dueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
-    await Activity.create({ tenant, text: desc, type: 'success' });
-  }
-
-  await debt.save();
-  return NextResponse.json(debt.toJSON());
-}
+    const hasOverdu

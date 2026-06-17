@@ -86,9 +86,4 @@ export async function POST(request) {
   const paidLabel = paidCount > 0 ? ` (${paidCount} parcelas já pagas)` : '';
   await Activity.create({
     tenant,
-    text: `➕ Nova dívida: <strong>${name}</strong> — ${product} (R$ ${Number(total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})${paidLabel}`,
-    type: 'info',
-  });
-
-  return NextResponse.json(debt.toJSON(), { status: 201 });
-}
+    text: `➕ Nova dívida: <strong>${name}</strong> — ${product} (R$ ${Number(total).toLocaleString(

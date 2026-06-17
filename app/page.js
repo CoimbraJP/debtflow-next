@@ -119,6 +119,7 @@ export default function App() {
 
   // UX1: Button-level loading states
   const [btnLoading, setBtnLoading] = useState({});
+  const [kpiPanel,   setKpiPanel]   = useState(null); // null | 'received' | 'overdue' | 'upcoming'
   // UX5: Form validation errors
   const [formErrors, setFormErrors] = useState({});
 
@@ -690,17 +691,21 @@ export default function App() {
             <section>
               <div className="kpi-grid">
                 {[
-                  { label:'Total em Aberto', value:`R$ ${fmt(totalOpen)}`, cls:'primary', icon:<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></> },
-                  { label:'Recebido no Mês', value:`R$ ${fmt(received)}`,  cls:'accent',  icon:<><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></> },
-                  { label:'Inadimplentes',   value:overdueCount,           cls:'danger',  icon:<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></> },
-                  { label:'Vence em 5 dias', value:upcomingCount,          cls:'warning', icon:<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></> },
-                ].map(({ label, value, cls, icon }) => (
-                  <div key={label} className={`kpi-card ${cls}`}>
+                  { label:'Total em Aberto', value:`R$ ${fmt(totalOpen)}`, cls:'primary', panel:null,       icon:<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></> },
+                  { label:'Recebido no Mês', value:`R$ ${fmt(received)}`,  cls:'accent',  panel:'received', icon:<><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></> },
+                  { label:'Inadimplentes',   value:overdueCount,           cls:'danger',  panel:'overdue',  icon:<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></> },
+                  { label:'Vence em 5 dias', value:upcomingCount,          cls:'warning', panel:'upcoming', icon:<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></> },
+                ].map(({ label, value, cls, icon, panel }) => (
+                  <div key={label} className={`kpi-card ${cls}`}
+                    onClick={panel ? () => setKpiPanel(panel) : undefined}
+                    style={panel ? {cursor:'pointer',position:'relative'} : undefined}
+                    title={panel ? 'Clique para detalhes' : undefined}>
                     <div className="kpi-header">
                       <span className="kpi-label">{label}</span>
                       <div className="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icon}</svg></div>
                     </div>
                     <div className="kpi-value currency">{value}</div>
+                    {panel && <span style={{position:'absolute',bottom:8,right:10,fontSize:10,opacity:.5,letterSpacing:.5}}>ver detalhes ▸</span>}
                   </div>
                 ))}
               </div>
@@ -1176,6 +1181,134 @@ export default function App() {
         </div>
       </Modal>
 
+      {/* ── KPI PANEL ───────────────────────────────────────────── */}
+      {kpiPanel && (() => {
+        const fmtV = v => Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const fmtD = s => { if(!s) return '—'; const[y,m,d]=s.split('-'); return `${d}/${m}/${y}`; };
+        const diffDays = (a,b) => { const ms=new Date(b+'T00:00:00Z')-new Date(a+'T00:00:00Z'); return Math.round(ms/86400000); };
+        const thisMonth = today.slice(0,7);
+
+        let title, rows, cols;
+
+        if (kpiPanel === 'received') {
+          title = `Recebido em ${new Date(thisMonth+'-01').toLocaleString('pt-BR',{month:'long',year:'numeric'})}`;
+          rows = [];
+          debts.forEach(d => {
+            (d.installmentList||[]).forEach(inst => {
+              if (!['paid','partial'].includes(inst.status)) return;
+              if (!inst.paidDate?.startsWith(thisMonth)) return;
+              const paid = inst.paidAmount ?? inst.value;
+              const juros = (inst.penaltyApplied && inst.penaltyRate > 0)
+                ? Math.max(0, inst.value - inst.originalValue) : 0;
+              rows.push({ name: d.name, product: d.product, inst: `${inst.number}/${d.installments}`,
+                paid, juros, date: inst.paidDate, status: inst.status });
+            });
+          });
+          rows.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+          cols = ['Cliente','Produto','Parcela','Pago em','Valor Pago','Juros Inclusos'];
+        }
+
+        if (kpiPanel === 'overdue') {
+          title = 'Clientes Inadimplentes';
+          rows = [];
+          debts.forEach(d => {
+            (d.installmentList||[]).forEach(inst => {
+              if (['paid','partial','skipped'].includes(inst.status)) return;
+              const diff = diffDays(today, inst.dueDate);
+              if (diff >= 0) return;
+              rows.push({ name: d.name, phone: d.phone, product: d.product,
+                inst: `${inst.number}/${d.installments}`, value: inst.value,
+                dueDate: inst.dueDate, days: -diff });
+            });
+          });
+          rows.sort((a,b) => b.days - a.days);
+          cols = ['Cliente','WhatsApp','Produto','Parcela','Valor','Venceu em','Dias em Atraso'];
+        }
+
+        if (kpiPanel === 'upcoming') {
+          title = 'Vencimentos nos próximos 5 dias';
+          rows = [];
+          debts.forEach(d => {
+            (d.installmentList||[]).forEach(inst => {
+              if (['paid','partial','skipped'].includes(inst.status)) return;
+              const diff = diffDays(today, inst.dueDate);
+              if (diff < 0 || diff > 5) return;
+              rows.push({ name: d.name, phone: d.phone, product: d.product,
+                inst: `${inst.number}/${d.installments}`, value: inst.value,
+                dueDate: inst.dueDate, days: diff });
+            });
+          });
+          rows.sort((a,b) => a.days - b.days);
+          cols = ['Cliente','WhatsApp','Produto','Parcela','Valor','Vencimento','Dias Restantes'];
+        }
+
+        return (
+          <div className="modal-backdrop open" onClick={e => { if(e.target===e.currentTarget) setKpiPanel(null); }}>
+            <div className="modal" style={{maxWidth:720,maxHeight:'85vh',display:'flex',flexDirection:'column'}}>
+              <div className="modal-header">
+                <div><div className="modal-title">{title}</div>
+                  <div className="modal-subtitle">{rows.length} {rows.length===1?'registro':'registros'}</div>
+                </div>
+                <button className="modal-close" onClick={() => setKpiPanel(null)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div className="modal-body" style={{overflowY:'auto',flex:1,padding:'12px 20px'}}>
+                {rows.length === 0
+                  ? <div style={{textAlign:'center',padding:32,color:'var(--text-muted)',fontSize:14}}>Nenhum registro encontrado.</div>
+                  : (
+                  <div className="table-container" style={{margin:0}}>
+                    <table className="data-table" style={{fontSize:13}}>
+                      <thead><tr>{cols.map(c=><th key={c}>{c}</th>)}</tr></thead>
+                      <tbody>
+                        {kpiPanel === 'received' && rows.map((r,i) => (
+                          <tr key={i}>
+                            <td><strong>{r.name}</strong></td>
+                            <td>{r.product}</td>
+                            <td>{r.inst}</td>
+                            <td>{fmtD(r.date)}</td>
+                            <td style={{color:'var(--color-success)',fontWeight:600}}>R$ {fmtV(r.paid)}</td>
+                            <td>{r.juros > 0
+                              ? <span style={{color:'#f5a623',fontWeight:600}}>R$ {fmtV(r.juros)}</span>
+                              : <span style={{color:'var(--text-muted)'}}>—</span>}
+                            </td>
+                          </tr>
+                        ))}
+                        {kpiPanel === 'overdue' && rows.map((r,i) => (
+                          <tr key={i}>
+                            <td><strong>{r.name}</strong></td>
+                            <td>{r.phone || '—'}</td>
+                            <td>{r.product}</td>
+                            <td>{r.inst}</td>
+                            <td style={{fontWeight:600}}>R$ {fmtV(r.value)}</td>
+                            <td>{fmtD(r.dueDate)}</td>
+                            <td><span style={{color:'var(--color-danger)',fontWeight:700}}>{r.days} dia{r.days!==1?'s':''}</span></td>
+                          </tr>
+                        ))}
+                        {kpiPanel === 'upcoming' && rows.map((r,i) => (
+                          <tr key={i}>
+                            <td><strong>{r.name}</strong></td>
+                            <td>{r.phone || '—'}</td>
+                            <td>{r.product}</td>
+                            <td>{r.inst}</td>
+                            <td style={{fontWeight:600}}>R$ {fmtV(r.value)}</td>
+                            <td>{fmtD(r.dueDate)}</td>
+                            <td>{r.days === 0
+                              ? <span style={{color:'var(--color-warning)',fontWeight:700}}>Hoje</span>
+                              : <span style={{color:'var(--color-accent)',fontWeight:700}}>{r.days} dia{r.days!==1?'s':''}</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── MODAL: Confirmação genérica ──────────────────────────── */}
       <Modal open={gcModal} onClose={() => setGcModal(false)} title={gcData.title} maxWidth={420}>
         <p style={{color:'var(--text-secondary)',fontSize:14,lineHeight:1.6}} dangerouslySetInnerHTML={{ __html: gcData.msg }} />
@@ -1301,6 +1434,14 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
 
   const firstPending = debt.installmentList?.find(i=>!['paid','partial','skipped'].includes(i.status));
 
+  // Soma apenas os juros de mora cobrados pelo scheduler (penaltyApplied + penaltyRate > 0)
+  // parcelas com isPenalty mas sem penaltyRate são carry-over de pagamento parcial (não conta)
+  const jurosJaPagos = (debt.installmentList || []).reduce((sum, inst) => {
+    if (!['paid','partial'].includes(inst.status)) return sum;
+    if (!inst.penaltyApplied || !(inst.penaltyRate > 0)) return sum;
+    return sum + Math.max(0, inst.value - inst.originalValue);
+  }, 0);
+
   return (
     <>
       <div className="side-panel-header">
@@ -1322,10 +1463,15 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
         <div className="settings-card" style={{marginBottom:16}}>
           <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
             <div className="table-avatar" style={{width:48,height:48,borderRadius:'50%',background:'var(--color-primary)',fontSize:20,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>{debt.name[0]?.toUpperCase()}</div>
-            <div>
+            <div style={{flex:1}}>
               <div style={{fontWeight:700,fontSize:16}}>{debt.name}</div>
               {debt.phone && <div style={{fontSize:13,color:'var(--text-muted)'}}>{debt.phone}</div>}
               {debt.address && <div style={{fontSize:12,color:'var(--text-muted)'}}>{debt.address}</div>}
+              <div style={{marginTop:8,display:'inline-flex',alignItems:'center',gap:6,background:'rgba(255,165,0,.08)',border:'1px solid rgba(255,165,0,.25)',borderRadius:6,padding:'4px 10px'}}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f5a623" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:500,userSelect:'none'}}>Juros já pagos</span>
+                <span style={{fontSize:12,fontWeight:700,color:'#f5a623'}}>{jurosJaPagos > 0 ? `R$ ${fmt(jurosJaPagos)}` : 'R$ 0,00'}</span>
+              </div>
             </div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>

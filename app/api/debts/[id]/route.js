@@ -99,33 +99,4 @@ export async function PUT(request, { params }) {
 
   // Recalcula status geral
   const allSettled = debt.installmentList.every(i => ['paid', 'partial', 'skipped'].includes(i.status));
-  const hasOverdue  = debt.installmentList.some(i => i.status === 'overdue' || i.status === 'skipped');
-  debt.status = allSettled ? 'paid' : hasOverdue ? 'overdue' : 'pending';
-
-  await debt.save();
-  await Activity.create({
-    tenant,
-    text: `✏️ Dívida atualizada: <strong>${name}</strong> — ${product}`,
-    type: 'info',
-  });
-
-  return NextResponse.json(debt.toJSON());
-}
-
-// DELETE /api/debts/:id — Remover dívida
-export async function DELETE(request, { params }) {
-  await connectDB();
-  const tenant = request.headers.get('x-tenant') || 'default';
-  const { id } = await params;
-
-  const debt = await Debt.findOneAndDelete({ _id: id, tenant });
-  if (!debt) return NextResponse.json({ error: 'Dívida não encontrada' }, { status: 404 });
-
-  await Activity.create({
-    tenant,
-    text: `🗑️ Dívida removida: <strong>${debt.name}</strong>`,
-    type: 'warning',
-  });
-
-  return NextResponse.json({ ok: true });
-}
+  const hasOverdue  = debt.installmentList.some(i => i.status === 'over
