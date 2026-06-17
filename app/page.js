@@ -1288,7 +1288,7 @@ export default function App() {
             });
           });
           rows.sort((a,b) => (b.date||'').localeCompare(a.date||''));
-          cols = ['Cliente','Produto','Parcela','Pago em','Valor Pago','Juros Inclusos'];
+          cols = ['Cliente','Produto','Parcela','Pago em','Valor Pago','Juros Mensais'];
         }
 
         if (kpiPanel === 'overdue') {
