@@ -119,7 +119,8 @@ export default function App() {
 
   // UX1: Button-level loading states
   const [btnLoading, setBtnLoading] = useState({});
-  const [kpiPanel,   setKpiPanel]   = useState(null); // null | 'received' | 'overdue' | 'upcoming'
+  const [kpiPanel,   setKpiPanel]   = useState(null);
+  const [payStep,    setPayStep]    = useState('enter'); // 'enter' | 'preview' // null | 'received' | 'overdue' | 'upcoming'
   // UX5: Form validation errors
   const [formErrors, setFormErrors] = useState({});
 
@@ -258,9 +259,20 @@ export default function App() {
 
   // ── Pagamentos ─────────────────────────────────────────────────────────
   function openPayModal(debt, inst, idx) {
+    setPayStep('enter');
     setPayInfo({ debt, inst, idx, date: today, payAmount: inst?.value ?? '' });
     setPayModal(true);
   }
+  function handlePaySubmit() {
+    const dueValue = parseFloat(payInfo.inst?.value) || 0;
+    const payAmt   = parseFloat(payInfo.payAmount)   || 0;
+    if (payAmt > 0 && payAmt < dueValue - 0.009 && payStep === 'enter') {
+      setPayStep('preview');
+      return;
+    }
+    confirmPayment();
+  }
+
   async function confirmPayment() {
     setBtnLoading(b => ({...b, pay: true}));
     try {
@@ -1131,8 +1143,8 @@ export default function App() {
       </Modal>
 
       {/* ── MODAL: Pagamento ─────────────────────────────────────── */}
-      <Modal open={payModal} onClose={() => setPayModal(false)} title="Registrar Pagamento" subtitle="Confirme o pagamento da parcela" maxWidth={420}>
-        {payInfo.inst && <>
+      <Modal open={payModal} onClose={() => { setPayModal(false); setPayStep('enter'); }} title={payStep==='preview' ? 'Confirmar Pagamento Parcial' : 'Registrar Pagamento'} subtitle={payStep==='preview' ? 'Revise os valores antes de confirmar' : 'Confirme o pagamento da parcela'} maxWidth={420}>
+        {payInfo.inst && payStep === 'enter' && <>
           {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor Devido',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
             <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value currency">{v}</span></div>
           ))}
@@ -1144,24 +1156,58 @@ export default function App() {
                 value={payInfo.payAmount ?? ''}
                 onChange={e => setPayInfo(p => ({...p, payAmount: e.target.value}))} />
             </div>
-            {parseFloat(payInfo.payAmount) < parseFloat(payInfo.inst?.value) - 0.009 && parseFloat(payInfo.payAmount) > 0 && (
-              <span className="form-hint" style={{color:'var(--color-warning)',marginTop:6,display:'block'}}>
-                ⚠️ Pagamento parcial: saldo restante de R$ {fmt(payInfo.inst.value - parseFloat(payInfo.payAmount))} terá juros de {payInfo.debt?.interestRate ?? 0}% e será somado à próxima parcela.
-              </span>
-            )}
           </div>
           <div className="form-group">
             <label className="form-label">Data do Pagamento</label>
             <input className="form-control" type="date" value={payInfo.date} onChange={e=>setPayInfo(p=>({...p,date:e.target.value}))} />
           </div>
         </>}
+        {payInfo.inst && payStep === 'preview' && (() => {
+          const dueVal  = parseFloat(payInfo.inst.value) || 0;
+          const payAmt  = parseFloat(payInfo.payAmount)  || 0;
+          const saldo   = parseFloat((dueVal - payAmt).toFixed(2));
+          const taxa    = parseFloat(payInfo.debt?.interestRate) || 0;
+          const juros   = parseFloat((saldo * taxa / 100).toFixed(2));
+          const carry   = parseFloat((saldo + juros).toFixed(2));
+          const rows = [
+            ['Valor da parcela',         `R$ ${fmt(dueVal)}`,  null],
+            ['Valor informado',          `R$ ${fmt(payAmt)}`,  'var(--color-accent)'],
+            ['Saldo não pago',           `R$ ${fmt(saldo)}`,   'var(--color-warning)'],
+            [`Juros sobre o saldo (${taxa}%)`, `R$ ${fmt(juros)}`, '#f5a623'],
+            ['Total para próxima parcela', `R$ ${fmt(carry)}`, 'var(--color-danger)'],
+          ];
+          return (
+            <div style={{display:'flex',flexDirection:'column',gap:0}}>
+              {rows.map(([l,v,c]) => (
+                <div key={l} className="stat-row" style={{borderBottom:'1px solid var(--border-default)',padding:'10px 0'}}>
+                  <span className="stat-row-label" style={{fontSize:13}}>{l}</span>
+                  <span className="stat-row-value currency" style={{fontWeight:700,color:c||'var(--text-primary)'}}>{v}</span>
+                </div>
+              ))}
+              <div style={{marginTop:12,padding:'10px 12px',background:'rgba(255,165,0,.08)',borderRadius:'var(--radius-md)',border:'1px solid rgba(255,165,0,.2)',fontSize:12,color:'var(--color-warning)',lineHeight:1.5}}>
+                ⚠️ O valor de <strong>R$ {fmt(carry)}</strong> (saldo + juros de {taxa}%) será adicionado à próxima parcela em aberto.
+              </div>
+            </div>
+          );
+        })()}
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={() => setPayModal(false)} disabled={btnLoading.pay}>Cancelar</button>
-          <button className="btn btn-accent" onClick={confirmPayment} disabled={btnLoading.pay} aria-busy={!!btnLoading.pay}>
-            {btnLoading.pay
-              ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Processando...</>
-              : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Confirmar Pagamento</>}
-          </button>
+          {payStep === 'preview'
+            ? <>
+                <button className="btn btn-ghost" onClick={() => setPayStep('enter')} disabled={btnLoading.pay}>← Voltar</button>
+                <button className="btn btn-accent" onClick={confirmPayment} disabled={btnLoading.pay} aria-busy={!!btnLoading.pay}>
+                  {btnLoading.pay
+                    ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Processando...</>
+                    : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Confirmar mesmo assim</>}
+                </button>
+              </>
+            : <>
+                <button className="btn btn-ghost" onClick={() => { setPayModal(false); setPayStep('enter'); }} disabled={btnLoading.pay}>Cancelar</button>
+                <button className="btn btn-accent" onClick={handlePaySubmit} disabled={btnLoading.pay} aria-busy={!!btnLoading.pay}>
+                  {btnLoading.pay
+                    ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Processando...</>
+                    : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Confirmar Pagamento</>}
+                </button>
+              </>}
         </div>
       </Modal>
 
@@ -1198,11 +1244,14 @@ export default function App() {
               if (!['paid','partial'].includes(inst.status)) return;
               if (!inst.paidDate?.startsWith(thisMonth)) return;
               const paid = inst.paidAmount ?? inst.value;
+              const _rate = parseFloat(d.interestRate) || 0;
               let juros = 0;
-              if (inst.penaltyApplied && inst.penaltyRate > 0) {
-                juros += Math.max(0, (inst.value || 0) - (inst.originalValue || 0));
+              if (inst.status === 'partial') {
+                const _saldo = Math.max(0, (inst.value||0) - (inst.paidAmount||0));
+                juros = parseFloat((_saldo * _rate / 100).toFixed(2));
+              } else if (inst.penaltyApplied && inst.penaltyRate > 0) {
+                juros = Math.max(0, (inst.value||0) - (inst.originalValue||0));
               }
-              juros += (inst.carriedInterest || 0);
               rows.push({ name: d.name, product: d.product, inst: `${inst.number}/${d.installments}`,
                 paid, juros, date: inst.paidDate, status: inst.status });
             });
@@ -1437,20 +1486,26 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
 
   const firstPending = debt.installmentList?.find(i=>!['paid','partial','skipped'].includes(i.status));
 
-  // Juros já pagos = juros do scheduler (penaltyRate) + juros carregados de skip/parcial (carriedInterest)
-  const jurosJaPagos = (debt.installmentList || []).reduce((sum, inst) => {
-    if (!['paid', 'partial'].includes(inst.status)) return sum;
+  // Juros já pagos — usa a MESMA lógica das rows das parcelas para garantir consistência:
+  // • Skipped : inst.value × taxa  (mesmo cálculo do preview na row)
+  // • Partial : saldo × taxa       (mesmo cálculo do preview na row)
+  // • Paid c/ penaltyRate : value − originalValue  (juros do scheduler, só nesta parcela)
+  // Sem double-count: parcelas que recebem carry têm isPenalty=true, penaltyApplied=false
+  const jurosJaPagos = (() => {
+    const rate = parseFloat(debt.interestRate) || 0;
     let interest = 0;
-    // Juros aplicados pelo scheduler nesta própria parcela (5+ dias de atraso)
-    if (inst.penaltyApplied && inst.penaltyRate > 0) {
-      interest += Math.max(0, (inst.value || 0) - (inst.originalValue || 0));
-    }
-    // Juros carregados de parcela anterior (skip ou pagamento parcial)
-    if ((inst.carriedInterest || 0) > 0) {
-      interest += inst.carriedInterest;
-    }
-    return sum + interest;
-  }, 0);
+    (debt.installmentList || []).forEach(inst => {
+      if (inst.status === 'skipped') {
+        interest += parseFloat(((inst.value || 0) * rate / 100).toFixed(2));
+      } else if (inst.status === 'partial') {
+        const saldo = Math.max(0, (inst.value || 0) - (inst.paidAmount || 0));
+        interest += parseFloat((saldo * rate / 100).toFixed(2));
+      } else if (inst.status === 'paid' && inst.penaltyApplied && inst.penaltyRate > 0) {
+        interest += Math.max(0, (inst.value || 0) - (inst.originalValue || 0));
+      }
+    });
+    return Math.max(0, parseFloat(interest.toFixed(2)));
+  })();
 
   return (
     <>
@@ -1576,16 +1631,25 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                       Pago: R$ {fmt(inst.paidAmount??inst.value)}{inst.paidDate ? ` · em ${fmtD(inst.paidDate)}` : ''}
                     </div>
                   )}
-                  {isPartial && (
-                    <>
-                      <div style={{fontSize:11,color:'var(--text-muted)'}}>Valor: R$ {fmt(inst.value)} · Venc: {fmtD(inst.dueDate)}</div>
-                      <div style={{fontSize:11,color:'#f5a623',fontWeight:600}}>Pago: R$ {fmt(inst.paidAmount)}</div>
-                      <div style={{fontSize:11,color:'var(--text-muted)'}}>Saldo transferido: R$ {fmt(inst.value-(inst.paidAmount||0))} + juros</div>
-                    </>
-                  )}
-                  {isSkipped && (
-                    <div style={{fontSize:11,color:'var(--color-danger)'}}>R$ {fmt(inst.value)} + juros transferidos para próxima</div>
-                  )}
+                  {isPartial && (() => {
+                    const saldo  = parseFloat((inst.value - (inst.paidAmount||0)).toFixed(2));
+                    const juros  = parseFloat((saldo * (debt.interestRate||0) / 100).toFixed(2));
+                    return (
+                      <>
+                        <div style={{fontSize:11,color:'var(--text-muted)'}}>valor R$ {fmt(inst.value)} — vence {fmtD(inst.dueDate)}</div>
+                        <div style={{fontSize:11,color:'#f5a623',fontWeight:600}}>pago R$: {fmt(inst.paidAmount)}</div>
+                        <div style={{fontSize:11,color:'var(--text-muted)'}}>saldo transferido: R$ {fmt(saldo)} <span style={{color:'#f5a623'}}>({`+ juros R$ ${fmt(juros)}`})</span></div>
+                      </>
+                    );
+                  })()}
+                  {isSkipped && (() => {
+                    const juros = parseFloat((inst.value * (debt.interestRate||0) / 100).toFixed(2));
+                    return (
+                      <div style={{fontSize:11,color:'var(--color-danger)'}}>
+                        R$ {fmt(inst.value)} transferido <span style={{color:'#f5a623'}}>({`+ juros R$ ${fmt(juros)}`})</span> para próxima
+                      </div>
+                    );
+                  })()}
                   {!isDone && (
                     <div style={{fontSize:11,color:'var(--text-muted)'}}>Vence: {fmtD(inst.dueDate)} · R$ {fmt(inst.value)}</div>
                   )}
