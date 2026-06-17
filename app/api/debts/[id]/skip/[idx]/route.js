@@ -24,6 +24,10 @@ export async function POST(request, { params }) {
   const interest     = parseFloat((instValue * interestRate / 100).toFixed(2));
   const carry        = parseFloat((instValue + interest).toFixed(2));
 
+  // Juros acumulados desta parcela + juros de carries anteriores (cadeia de skips/parciais)
+  // Garante que o carriedInterest do próximo sempre reflete o TOTAL de juros acumulados
+  const totalInterestToCarry = parseFloat((interest + (inst.carriedInterest || 0)).toFixed(2));
+
   // Marca parcela como 'skipped' — sem pagamento, saldo levado para a próxima
   inst.status         = 'skipped';
   inst.penaltyApplied = true;
@@ -31,12 +35,11 @@ export async function POST(request, { params }) {
   inst.overdueSent    = true;
 
   // Transfere valor + juros para a próxima parcela em aberto
-  // e registra separadamente a porção de juros para rastreamento
   const nextInst = debt.installmentList.find((p, j) => j > i && !['paid', 'partial', 'skipped'].includes(p.status));
   if (nextInst) {
     nextInst.value           = parseFloat((parseFloat(nextInst.value) + carry).toFixed(2));
     nextInst.isPenalty       = true;
-    nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + interest).toFixed(2));
+    nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + totalInterestToCarry).toFixed(2));
   }
 
   // Registra histórico

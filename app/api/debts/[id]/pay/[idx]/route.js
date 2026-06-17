@@ -41,11 +41,14 @@ export async function POST(request, { params }) {
     inst.overdueSent    = true;
     inst.penaltyApplied = true;
 
+    // Carrega TODOS os juros acumulados (novos + anteriores) para a próxima parcela
+    const totalInterestToCarry = parseFloat((interestPart + (inst.carriedInterest || 0)).toFixed(2));
+
     const nextInst = debt.installmentList.find((p, j) => j > i && !['paid', 'partial', 'skipped'].includes(p.status));
     if (nextInst) {
       nextInst.value           = parseFloat((parseFloat(nextInst.value) + carry).toFixed(2));
       nextInst.isPenalty       = true;
-      nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + interestPart).toFixed(2));
+      nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + totalInterestToCarry).toFixed(2));
     }
   }
 

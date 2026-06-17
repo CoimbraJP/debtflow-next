@@ -1276,11 +1276,25 @@ export default function App() {
                 juros = parseFloat((_saldo * _rate / 100).toFixed(2));
               } else if (inst.status === 'paid') {
                 if (inst.penaltyApplied && inst.penaltyRate > 0) {
-                  // Multa do scheduler (5+ dias de atraso): valor cresceu sobre o original
+                  // Multa do scheduler (5+ dias de atraso)
                   juros = Math.max(0, (inst.value||0) - (inst.originalValue||0));
-                } else if ((inst.carriedInterest || 0) > 0) {
-                  // Juro carregado de skip ou parcial anterior — campo gravado nas rotas skip/pay
-                  juros = inst.carriedInterest;
+                } else if (inst.isPenalty) {
+                  // Doublecheck: percorre para trás a cadeia de skips/parciais que alimentaram
+                  // esta parcela e soma todos os juros — funciona em dados antigos e novos.
+                  const allI = d.installmentList;
+                  const iIdx = allI.indexOf(inst);
+                  for (let j = iIdx - 1; j >= 0; j--) {
+                    const prev = allI[j];
+                    if (prev.status === 'skipped') {
+                      juros = parseFloat((juros + (prev.value||0) * _rate / 100).toFixed(2));
+                    } else if (prev.status === 'partial') {
+                      const prevSaldo = Math.max(0, (prev.value||0) - (prev.paidAmount||0));
+                      juros = parseFloat((juros + prevSaldo * _rate / 100).toFixed(2));
+                      break;
+                    } else {
+                      break;
+                    }
+                  }
                 }
               }
               rows.push({ name: d.name, product: d.product, inst: `${inst.number}/${d.installments}`,
