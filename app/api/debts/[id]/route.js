@@ -36,18 +36,23 @@ export async function PUT(request, { params }) {
 
   const { name, phone, address, product, total, installments, dueDay, interestRate, notes, startDate } = body;
 
+  // Normaliza createdAt para YYYY-MM-DD antes de comparar
+  // (Mongoose devolve Date object; comparação estrita com string sempre falhava)
+  const dbCreatedAt = String(debt.createdAt || '').slice(0, 10);
   const needsRegen = (
     debt.total        !== parseFloat(total)        ||
     debt.installments !== parseInt(installments)   ||
     debt.dueDay       !== parseInt(dueDay)         ||
-    debt.createdAt    !== startDate
+    dbCreatedAt       !== (startDate || '').slice(0, 10)
   );
 
   // Preserva pagamentos antes de regenerar
   const paidByNum = {};
   if (needsRegen) {
     debt.installmentList.forEach(inst => {
-      if (inst.status === 'paid') paidByNum[inst.number] = { status: 'paid', paidDate: inst.paidDate };
+      if (['paid', 'partial', 'skipped'].includes(inst.status)) {
+        paidByNum[inst.number] = { status: inst.status, paidDate: inst.paidDate, paidAmount: inst.paidAmount };
+      }
     });
   }
 
@@ -63,17 +68,21 @@ export async function PUT(request, { params }) {
   debt.createdAt    = startDate;
 
   if (needsRegen) {
+    // Garante que createdAt é passado como string YYYY-MM-DD para generateInstallments
+    const createdAtStr = String(debt.createdAt || startDate || '').slice(0, 10);
     const newList = generateInstallments({
       total: debt.total, installments: debt.installments,
-      dueDay: debt.dueDay, createdAt: debt.createdAt,
+      dueDay: debt.dueDay, createdAt: createdAtStr,
     });
     // Restaura pagamentos confirmados
     newList.forEach(inst => {
       if (paidByNum[inst.number]) {
-        inst.status   = 'paid';
-        inst.paidDate = paidByNum[inst.number].paidDate;
+        const p = paidByNum[inst.number];
+        inst.status      = p.status;
+        inst.paidDate    = p.paidDate;
+        inst.paidAmount  = p.paidAmount || null;
         inst.penaltyApplied = true;
-        inst.dueSent  = true;
+        inst.dueSent     = true;
         inst.overdueSent = true;
       }
     });
@@ -87,8 +96,9 @@ export async function PUT(request, { params }) {
   }
 
   // Recalcula status geral
-  const allPaid = debt.installmentList.every(i => i.status === 'paid');
-  debt.status   = allPaid ? 'paid' : 'pending';
+  const allSettled = debt.installmentList.every(i => ['paid', 'partial', 'skipped'].includes(i.status));
+  const hasOverdue  = debt.installmentList.some(i => i.status === 'overdue' || i.status === 'skipped');
+  debt.status = allSettled ? 'paid' : hasOverdue ? 'overdue' : 'pending';
 
   await debt.save();
   await Activity.create({

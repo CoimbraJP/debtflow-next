@@ -57,6 +57,9 @@ export async function POST(request) {
   if (!name || !product || !total || !installments || !dueDay || !startDate) {
     return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
   }
+  if (!phone || !String(phone).trim()) {
+    return NextResponse.json({ error: 'Número de WhatsApp é obrigatório' }, { status: 400 });
+  }
   if (dueDay < 1 || dueDay > 28) {
     return NextResponse.json({ error: 'Dia de vencimento deve ser entre 1 e 28' }, { status: 400 });
   }
