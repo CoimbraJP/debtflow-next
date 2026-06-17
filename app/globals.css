@@ -841,6 +841,16 @@ html, body {
   background: rgba(108,99,255,0.05);
 }
 
+/* UX5: Field-level validation error state */
+.form-control.input-error {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(255,71,87,0.18);
+}
+.form-control.input-error:focus {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(255,71,87,0.25);
+}
+
 .form-control:invalid:not(:placeholder-shown) {
   border-color: var(--color-danger);
   box-shadow: 0 0 0 3px var(--color-danger-glow);

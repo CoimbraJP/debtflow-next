@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 // ── Constantes ────────────────────────────────────────────────────────────
@@ -117,6 +117,11 @@ export default function App() {
   // Settings form local
   const [settForm,   setSettForm]   = useState(DEFAULT_SETTINGS);
 
+  // UX1: Button-level loading states
+  const [btnLoading, setBtnLoading] = useState({});
+  // UX5: Form validation errors
+  const [formErrors, setFormErrors] = useState({});
+
   const today = todayStr();
 
   // ── API helpers ──────────────────────────────────────────────────────
@@ -166,9 +171,22 @@ export default function App() {
   function navigate(p) { setPage(p); setSidebarOpen(false); setMobileMenuOpen(false); }
 
   // ── CRUD Dívidas ───────────────────────────────────────────────────────
+  // UX5: Validate debt form fields
+  function validateDebtForm(f) {
+    const errs = {};
+    if (!f.name?.trim())                                            errs.name         = 'Nome obrigatório';
+    if (!f.product?.trim())                                         errs.product      = 'Produto obrigatório';
+    if (!f.total || parseFloat(f.total) <= 0)                       errs.total        = 'Valor deve ser maior que zero';
+    if (!f.installments || parseInt(f.installments) < 1)            errs.installments = 'Mínimo 1 parcela';
+    if (!f.dueDay || parseInt(f.dueDay) < 1 || parseInt(f.dueDay) > 28) errs.dueDay  = 'Entre 1 e 28';
+    if (!f.startDate)                                               errs.startDate    = 'Data obrigatória';
+    return errs;
+  }
+
   function openNewDebt() {
     setEditId(null);
     setDebtForm({ ...EMPTY_FORM, startDate: today, interestRate: settings.defaultInterest || 10 });
+    setFormErrors({});
     setDebtModal(true);
   }
   function openEditDebt(debt) {
@@ -180,43 +198,55 @@ export default function App() {
       startDate: debt.createdAt, notes: debt.notes || '',
       paidInstallments: '',  // não preenchemos na edição
     });
+    setFormErrors({});
     setDebtModal(true);
   }
   async function saveDebt() {
     const f = debtForm;
-    if (!f.name || !f.product || !f.total || !f.installments || !f.dueDay || !f.startDate) {
-      toast('Preencha todos os campos obrigatórios', 'danger', 'Campos inválidos'); return;
+    const errs = validateDebtForm(f);
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      toast('Preencha todos os campos obrigatórios', 'danger', 'Campos inválidos');
+      return;
     }
-    if (f.dueDay < 1 || f.dueDay > 28) {
-      toast('Dia de vencimento deve ser entre 1 e 28', 'danger', 'Dia inválido'); return;
-    }
-    const body = {
-      ...f,
-      total:            parseFloat(f.total),
-      installments:     parseInt(f.installments),
-      dueDay:           parseInt(f.dueDay),
-      paidInstallments: parseInt(f.paidInstallments) || 0,
-    };
-    const r = editId
-      ? await api(`/api/debts/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
-      : await api('/api/debts', { method: 'POST', body: JSON.stringify(body) });
-    if (!r) return;
-    if (r.ok) {
-      toast(editId ? `Dívida de ${f.name} atualizada!` : `Dívida de ${f.name} cadastrada!`, 'success', editId ? 'Atualizado' : 'Criado');
-      setDebtModal(false);
-      fetchAll();
-    } else {
-      const e = await r.json();
-      toast(e.error || 'Erro ao salvar', 'danger', 'Erro');
+    setBtnLoading(b => ({...b, save: true}));
+    try {
+      const body = {
+        ...f,
+        total:            parseFloat(f.total),
+        installments:     parseInt(f.installments),
+        dueDay:           parseInt(f.dueDay),
+        paidInstallments: parseInt(f.paidInstallments) || 0,
+      };
+      const r = editId
+        ? await api(`/api/debts/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api('/api/debts', { method: 'POST', body: JSON.stringify(body) });
+      if (!r) return;
+      if (r.ok) {
+        toast(editId ? `Dívida de ${f.name} atualizada!` : `Dívida de ${f.name} cadastrada!`, 'success', editId ? 'Atualizado' : 'Criado');
+        setFormErrors({});
+        setDebtModal(false);
+        fetchAll();
+      } else {
+        const e = await r.json();
+        toast(e.error || 'Erro ao salvar', 'danger', 'Erro');
+      }
+    } finally {
+      setBtnLoading(b => ({...b, save: false}));
     }
   }
   async function deleteDebt(debt) {
-    const r = await api(`/api/debts/${debt.id}`, { method: 'DELETE' });
-    if (r?.ok) {
-      toast('Dívida removida com sucesso', 'success', 'Removido');
-      setDelModal(false);
-      setSideDebt(null);
-      fetchAll();
+    setBtnLoading(b => ({...b, delete: true}));
+    try {
+      const r = await api(`/api/debts/${debt.id}`, { method: 'DELETE' });
+      if (r?.ok) {
+        toast('Dívida removida com sucesso', 'success', 'Removido');
+        setDelModal(false);
+        setSideDebt(null);
+        fetchAll();
+      }
+    } finally {
+      setBtnLoading(b => ({...b, delete: false}));
     }
   }
 
@@ -226,40 +256,55 @@ export default function App() {
     setPayModal(true);
   }
   async function confirmPayment() {
-    const { debt, idx, date, payAmount } = payInfo;
-    const r = await api(`/api/debts/${debt.id}/pay/${idx}`, { method: 'POST', body: JSON.stringify({ payDate: date, payAmount: parseFloat(payAmount) || null }) });
-    if (r?.ok) {
-      const updated = await r.json();
-      toast(`Parcela ${payInfo.inst.number} de ${debt.name} registrada!`, 'success', 'Pagamento registrado');
-      setPayModal(false);
-      // Atualiza side panel se estiver aberto
-      if (sideDebt?.id === debt.id) setSideDebt(updated);
-      fetchAll();
+    setBtnLoading(b => ({...b, pay: true}));
+    try {
+      const { debt, idx, date, payAmount } = payInfo;
+      const r = await api(`/api/debts/${debt.id}/pay/${idx}`, { method: 'POST', body: JSON.stringify({ payDate: date, payAmount: parseFloat(payAmount) || null }) });
+      if (r?.ok) {
+        const updated = await r.json();
+        toast(`Parcela ${payInfo.inst.number} de ${debt.name} registrada!`, 'success', 'Pagamento registrado');
+        setPayModal(false);
+        // Atualiza side panel se estiver aberto
+        if (sideDebt?.id === debt.id) setSideDebt(updated);
+        fetchAll();
+      }
+    } finally {
+      setBtnLoading(b => ({...b, pay: false}));
     }
   }
 
   // ── WhatsApp ───────────────────────────────────────────────────────────
   async function sendWhatsApp(debt, inst, isOverdue = false) {
     if (!debt.phone) { toast('Sem número de WhatsApp', 'warning', 'Atenção'); return; }
-    const template = isOverdue ? settings.msgOverdue : settings.msgTemplate;
-    const text = buildMsg(template, debt, inst);
-    const hasApi = settings.apiUrl && settings.instance && settings.apiKey;
-    if (hasApi) {
-      toast('Enviando via API...', 'info', 'WhatsApp');
-      const ok = await sendViaAPI(debt.phone, text, settings);
-      if (ok) { toast(`Mensagem enviada para ${debt.name}!`, 'success', 'Enviado ✓'); return; }
+    setBtnLoading(b => ({...b, whatsapp: debt.id}));
+    try {
+      const template = isOverdue ? settings.msgOverdue : settings.msgTemplate;
+      const text = buildMsg(template, debt, inst);
+      const hasApi = settings.apiUrl && settings.instance && settings.apiKey;
+      if (hasApi) {
+        toast('Enviando via API...', 'info', 'WhatsApp');
+        const ok = await sendViaAPI(debt.phone, text, settings);
+        if (ok) { toast(`Mensagem enviada para ${debt.name}!`, 'success', 'Enviado ✓'); return; }
+      }
+      openWaMe(debt.phone, text);
+      toast('WhatsApp aberto! Clique em Enviar para confirmar.', 'success', 'WhatsApp pronto ✓');
+    } finally {
+      setBtnLoading(b => ({...b, whatsapp: false}));
     }
-    openWaMe(debt.phone, text);
-    toast('WhatsApp aberto! Clique em Enviar para confirmar.', 'success', 'WhatsApp pronto ✓');
   }
 
   // ── Settings ───────────────────────────────────────────────────────────
   async function saveSettings() {
-    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify(settForm) });
-    if (r?.ok) {
-      const s = await r.json();
-      setSettings({ ...DEFAULT_SETTINGS, ...s });
-      toast('Configurações salvas!', 'success', 'Salvo ✓');
+    setBtnLoading(b => ({...b, settings: true}));
+    try {
+      const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify(settForm) });
+      if (r?.ok) {
+        const s = await r.json();
+        setSettings({ ...DEFAULT_SETTINGS, ...s });
+        toast('Configurações salvas!', 'success', 'Salvo ✓');
+      }
+    } finally {
+      setBtnLoading(b => ({...b, settings: false}));
     }
   }
   async function testWhatsApp() {
@@ -338,22 +383,25 @@ export default function App() {
 
   // ── KPIs ───────────────────────────────────────────────────────────────
   const thisMonth = today.slice(0, 7);
-  let totalOpen = 0, received = 0, overdueCount = 0, upcomingCount = 0;
-  debts.forEach(d => {
-    d.installmentList?.forEach(i => {
-      if (i.status === 'paid') {
-        if (i.paidDate?.startsWith(thisMonth)) received += i.value;
-      } else {
-        totalOpen += i.value;
-        const diff = daysDiff(today, i.dueDate);
-        if (diff < 0)            overdueCount++;
-        if (diff >= 0 && diff <= 5) upcomingCount++;
-      }
+  const { totalOpen, received, overdueCount, upcomingCount } = useMemo(() => {
+    let totalOpen = 0, received = 0, overdueCount = 0, upcomingCount = 0;
+    debts.forEach(d => {
+      d.installmentList?.forEach(i => {
+        if (i.status === 'paid') {
+          if (i.paidDate?.startsWith(thisMonth)) received += i.value;
+        } else {
+          totalOpen += i.value;
+          const diff = daysDiff(today, i.dueDate);
+          if (diff < 0)               overdueCount++;
+          if (diff >= 0 && diff <= 5) upcomingCount++;
+        }
+      });
     });
-  });
+    return { totalOpen, received, overdueCount, upcomingCount };
+  }, [debts, today, thisMonth]);
 
   // ── Filtered debts ─────────────────────────────────────────────────────
-  const filteredDebts = debts.filter(d => {
+  const filteredDebts = useMemo(() => debts.filter(d => {
     const matchSearch = !search || d.name.toLowerCase().includes(search.toLowerCase()) || d.product.toLowerCase().includes(search.toLowerCase());
     if (!matchSearch) return false;
     if (filter === 'all')     return true;
@@ -367,42 +415,46 @@ export default function App() {
       return diff >= 0 && diff <= 5;
     }
     return true;
-  });
+  }), [debts, search, filter, today]);
 
   // ── Calendar items ─────────────────────────────────────────────────────
   const now   = new Date();
   const year  = now.getFullYear();
   const month = now.getMonth();
-  const calItems = [];
-  debts.forEach(debt => {
-    debt.installmentList?.forEach((inst, idx) => {
-      if (inst.status === 'paid') return;
-      const d    = new Date(inst.dueDate + 'T00:00:00');
-      const diff = daysDiff(today, inst.dueDate);
-      if ((d.getFullYear() === year && d.getMonth() === month) || diff < 0) {
-        calItems.push({ debt, inst, idx });
-      }
+  const calItems = useMemo(() => {
+    const items = [];
+    debts.forEach(debt => {
+      debt.installmentList?.forEach((inst, idx) => {
+        if (inst.status === 'paid') return;
+        const d    = new Date(inst.dueDate + 'T00:00:00');
+        const diff = daysDiff(today, inst.dueDate);
+        if ((d.getFullYear() === year && d.getMonth() === month) || diff < 0) {
+          items.push({ debt, inst, idx });
+        }
+      });
     });
-  });
-  calItems.sort((a, b) => a.inst.dueDate.localeCompare(b.inst.dueDate));
+    return items.sort((a, b) => a.inst.dueDate.localeCompare(b.inst.dueDate));
+  }, [debts, today, year, month]);
 
   // ── Bar chart data ─────────────────────────────────────────────────────
-  const months = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push({
-      key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
-      label: d.toLocaleString('pt-BR', { month: 'short' }),
-      value: 0,
-    });
-  }
-  debts.forEach(d => d.installmentList?.forEach(i => {
-    if (i.status === 'paid' && i.paidDate) {
-      const m = months.find(mo => i.paidDate.startsWith(mo.key));
-      if (m) m.value += i.value;
+  const { months, maxBar } = useMemo(() => {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+        label: d.toLocaleString('pt-BR', { month: 'short' }),
+        value: 0,
+      });
     }
-  }));
-  const maxBar = Math.max(...months.map(m => m.value), 1);
+    debts.forEach(d => d.installmentList?.forEach(i => {
+      if (i.status === 'paid' && i.paidDate) {
+        const m = months.find(mo => i.paidDate.startsWith(mo.key));
+        if (m) m.value += i.value;
+      }
+    }));
+    return { months, maxBar: Math.max(...months.map(m => m.value), 1) };
+  }, [debts, year, month]);
 
   // ════════════════════════════════════════════════════════════════════
   // RENDER
@@ -539,6 +591,22 @@ export default function App() {
         {mobileMenuOpen && (
           <div className="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)}>
             <div className="mobile-dropdown" onClick={e => e.stopPropagation()}>
+              {/* UX2: Mobile search */}
+              <div style={{padding:'12px 16px 4px'}}>
+                <div style={{position:'relative'}}>
+                  <svg style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',width:14,height:14,color:'var(--text-muted)',pointerEvents:'none'}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Buscar devedor..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && search.trim()) { setPage('debts'); setMobileMenuOpen(false); } }}
+                    style={{width:'100%',background:'var(--bg-elevated)',border:'1px solid var(--border-default)',borderRadius:'var(--radius-md)',padding:'8px 12px 8px 32px',fontSize:13,color:'var(--text-primary)',outline:'none',boxSizing:'border-box'}}
+                  />
+                </div>
+              </div>
               {[
                 { id:'dashboard', label:'Dashboard',   sub:'Visão geral',      icon:<><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></> },
                 { id:'debts',     label:'Dívidas',     sub:'Gerenciar cobranças', icon:<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>, badge: overdueCount },
@@ -742,15 +810,15 @@ export default function App() {
                             <td><StatusBadge debt={d} today={today} /></td>
                             <td onClick={e => e.stopPropagation()}>
                               <div style={{display:'flex',gap:6}}>
-                                <button className="btn btn-sm btn-ghost btn-icon" data-tooltip="Editar" onClick={() => openEditDebt(d)}>
+                                <button className="btn btn-sm btn-ghost btn-icon" aria-label="Editar dívida" data-tooltip="Editar" onClick={() => openEditDebt(d)}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                 </button>
                                 {d.phone && (
-                                  <a className="btn btn-sm btn-ghost btn-icon" href={`https://wa.me/${d.phone}`} target="_blank" rel="noopener" data-tooltip="WhatsApp" onClick={e => e.stopPropagation()}>
+                                  <a className="btn btn-sm btn-ghost btn-icon" href={`https://wa.me/${d.phone}`} target="_blank" rel="noopener" aria-label="Abrir WhatsApp" data-tooltip="WhatsApp" onClick={e => e.stopPropagation()}>
                                     <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                                   </a>
                                 )}
-                                <button className="btn btn-sm btn-ghost btn-icon" data-tooltip="Excluir" style={{color:'var(--color-danger)'}} onClick={() => { setDelDebt(d); setDelModal(true); }}>
+                                <button className="btn btn-sm btn-ghost btn-icon" aria-label="Excluir dívida" data-tooltip="Excluir" style={{color:'var(--color-danger)'}} onClick={() => { setDelDebt(d); setDelModal(true); }}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
                                 </button>
                               </div>
@@ -876,7 +944,11 @@ export default function App() {
                   </div>
                 ))}
                 <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-                  <button className="btn btn-primary" onClick={saveSettings}>Salvar Configurações</button>
+                  <button className="btn btn-primary" onClick={saveSettings} disabled={btnLoading.settings} aria-busy={!!btnLoading.settings}>
+                    {btnLoading.settings
+                      ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Salvando...</>
+                      : 'Salvar Configurações'}
+                  </button>
                   <button className="btn btn-ghost" onClick={testWhatsApp}>Testar Conexão API</button>
                 </div>
               </div>
@@ -940,7 +1012,8 @@ export default function App() {
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label">Nome do Devedor <span>*</span></label>
-            <input className="form-control" type="text" placeholder="João Silva" value={debtForm.name||''} onChange={e=>setDebtForm(f=>({...f,name:e.target.value}))} />
+            <input className={`form-control${formErrors.name ? ' input-error' : ''}`} type="text" placeholder="João Silva" value={debtForm.name||''} onChange={e=>{setDebtForm(f=>({...f,name:e.target.value}));if(formErrors.name)setFormErrors(fe=>({...fe,name:undefined}));}} />
+            {formErrors.name && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.name}</span>}
           </div>
           <div className="form-group">
             <label className="form-label">WhatsApp</label>
@@ -952,17 +1025,20 @@ export default function App() {
           </div>
           <div className="form-group full-width">
             <label className="form-label">Produto / Serviço <span>*</span></label>
-            <input className="form-control" type="text" placeholder="Ex: Notebook Dell, Serviço de Design..." value={debtForm.product||''} onChange={e=>setDebtForm(f=>({...f,product:e.target.value}))} />
+            <input className={`form-control${formErrors.product ? ' input-error' : ''}`} type="text" placeholder="Ex: Notebook Dell, Serviço de Design..." value={debtForm.product||''} onChange={e=>{setDebtForm(f=>({...f,product:e.target.value}));if(formErrors.product)setFormErrors(fe=>({...fe,product:undefined}));}} />
+            {formErrors.product && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.product}</span>}
           </div>
           <div className="form-group">
             <label className="form-label">Valor Total <span>*</span></label>
             <div className="input-prefix-wrapper"><span className="input-prefix">R$</span>
-              <input className="form-control" type="number" min="0.01" step="0.01" placeholder="0,00" value={debtForm.total||''} onChange={e=>setDebtForm(f=>({...f,total:e.target.value}))} />
+              <input className={`form-control${formErrors.total ? ' input-error' : ''}`} type="number" min="0.01" step="0.01" placeholder="0,00" value={debtForm.total||''} onChange={e=>{setDebtForm(f=>({...f,total:e.target.value}));if(formErrors.total)setFormErrors(fe=>({...fe,total:undefined}));}} />
             </div>
+            {formErrors.total && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.total}</span>}
           </div>
           <div className="form-group">
             <label className="form-label">Número de Parcelas <span>*</span></label>
-            <input className="form-control" type="number" min="1" max="360" placeholder="1" value={debtForm.installments||''} onChange={e=>setDebtForm(f=>({...f,installments:e.target.value}))} />
+            <input className={`form-control${formErrors.installments ? ' input-error' : ''}`} type="number" min="1" max="360" placeholder="1" value={debtForm.installments||''} onChange={e=>{setDebtForm(f=>({...f,installments:e.target.value}));if(formErrors.installments)setFormErrors(fe=>({...fe,installments:undefined}));}} />
+            {formErrors.installments && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.installments}</span>}
           </div>
           {!editId && (
             <div className="form-group">
@@ -978,8 +1054,10 @@ export default function App() {
           )}
           <div className="form-group">
             <label className="form-label">Dia de Vencimento <span>*</span></label>
-            <input className="form-control" type="number" min="1" max="28" placeholder="10" value={debtForm.dueDay||''} onChange={e=>setDebtForm(f=>({...f,dueDay:e.target.value}))} />
-            <span className="form-hint">Entre 1 e 28</span>
+            <input className={`form-control${formErrors.dueDay ? ' input-error' : ''}`} type="number" min="1" max="28" placeholder="10" value={debtForm.dueDay||''} onChange={e=>{setDebtForm(f=>({...f,dueDay:e.target.value}));if(formErrors.dueDay)setFormErrors(fe=>({...fe,dueDay:undefined}));}} />
+            {formErrors.dueDay
+              ? <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.dueDay}</span>
+              : <span className="form-hint">Entre 1 e 28</span>}
           </div>
           <div className="form-group">
             <label className="form-label">Juros por Atraso (%/mês)</label>
@@ -987,7 +1065,8 @@ export default function App() {
           </div>
           <div className="form-group">
             <label className="form-label">Data de Início <span>*</span></label>
-            <input className="form-control" type="date" value={debtForm.startDate||''} onChange={e=>setDebtForm(f=>({...f,startDate:e.target.value}))} />
+            <input className={`form-control${formErrors.startDate ? ' input-error' : ''}`} type="date" value={debtForm.startDate||''} onChange={e=>{setDebtForm(f=>({...f,startDate:e.target.value}));if(formErrors.startDate)setFormErrors(fe=>({...fe,startDate:undefined}));}} />
+            {formErrors.startDate && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.startDate}</span>}
           </div>
           <div className="form-group full-width">
             <label className="form-label">Observações</label>
@@ -995,8 +1074,12 @@ export default function App() {
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={() => setDebtModal(false)}>Cancelar</button>
-          <button className="btn btn-primary" onClick={saveDebt}>{editId ? 'Salvar Alterações' : 'Salvar Dívida'}</button>
+          <button className="btn btn-ghost" onClick={() => setDebtModal(false)} disabled={btnLoading.save}>Cancelar</button>
+          <button className="btn btn-primary" onClick={saveDebt} disabled={btnLoading.save} aria-busy={!!btnLoading.save}>
+            {btnLoading.save
+              ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Salvando...</>
+              : (editId ? 'Salvar Alterações' : 'Salvar Dívida')}
+          </button>
         </div>
       </Modal>
 
@@ -1026,10 +1109,11 @@ export default function App() {
           </div>
         </>}
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={() => setPayModal(false)}>Cancelar</button>
-          <button className="btn btn-accent" onClick={confirmPayment}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            Confirmar Pagamento
+          <button className="btn btn-ghost" onClick={() => setPayModal(false)} disabled={btnLoading.pay}>Cancelar</button>
+          <button className="btn btn-accent" onClick={confirmPayment} disabled={btnLoading.pay} aria-busy={!!btnLoading.pay}>
+            {btnLoading.pay
+              ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Processando...</>
+              : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Confirmar Pagamento</>}
           </button>
         </div>
       </Modal>
@@ -1041,8 +1125,12 @@ export default function App() {
           Todo o histórico de parcelas será removido permanentemente.
         </p>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={() => setDelModal(false)}>Cancelar</button>
-          <button className="btn btn-danger" onClick={() => delDebt && deleteDebt(delDebt)}>Excluir Definitivamente</button>
+          <button className="btn btn-ghost" onClick={() => setDelModal(false)} disabled={btnLoading.delete}>Cancelar</button>
+          <button className="btn btn-danger" onClick={() => delDebt && deleteDebt(delDebt)} disabled={btnLoading.delete} aria-busy={!!btnLoading.delete}>
+            {btnLoading.delete
+              ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Excluindo...</>
+              : 'Excluir Definitivamente'}
+          </button>
         </div>
       </Modal>
 
