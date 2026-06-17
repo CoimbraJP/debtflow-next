@@ -6,10 +6,10 @@ import { Activity }     from '@/lib/models/Activity';
 // POST /api/debts/:id/pay/:idx — Registrar pagamento de parcela
 export async function POST(request, { params }) {
   await connectDB();
-  const tenant   = request.headers.get('x-tenant') || 'default';
+  const tenant      = request.headers.get('x-tenant') || 'default';
   const { id, idx } = await params;
-  const body     = await request.json();
-  const payDate  = body.payDate || new Date().toISOString().slice(0, 10);
+  const body        = await request.json();
+  const payDate     = body.payDate || new Date().toISOString().slice(0, 10);
 
   const debt = await Debt.findOne({ _id: id, tenant });
   if (!debt) return NextResponse.json({ error: 'Dívida não encontrada' }, { status: 404 });
@@ -24,16 +24,18 @@ export async function POST(request, { params }) {
   const payAmount  = body.payAmount && body.payAmount > 0 ? parseFloat(body.payAmount) : dueValue;
   const isPartial  = payAmount < dueValue - 0.009; // tolerância de 1 centavo
 
-  // Status correto: 'partial' se pagamento menor que o valor devido
   inst.status     = isPartial ? 'partial' : 'paid';
   inst.paidDate   = payDate;
   inst.paidAmount = payAmount;
 
-  // Se pagamento parcial, adiciona saldo restante + juros à próxima parcela
+  // Pagamento parcial: saldo restante + juros transferidos para a próxima parcela
+  // Fórmula: saldo = (valorDevido - valorPago); carry = saldo * (1 + taxa/100)
+  // Apenas o juro (saldo * taxa/100) é rastreado em carriedInterest na próxima parcela
   if (isPartial) {
-    const remainder    = dueValue - payAmount;
-    const interestRate = parseFloat(debt.interestRate) || 0;
-    const carry        = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));
+    const remainder      = dueValue - payAmount;
+    const interestRate   = parseFloat(debt.interestRate) || 0;
+    const interestPart   = parseFloat((remainder * interestRate / 100).toFixed(2));
+    const carry          = parseFloat((remainder + interestPart).toFixed(2));
 
     inst.dueSent        = true;
     inst.overdueSent    = true;
@@ -41,8 +43,9 @@ export async function POST(request, { params }) {
 
     const nextInst = debt.installmentList.find((p, j) => j > i && !['paid', 'partial', 'skipped'].includes(p.status));
     if (nextInst) {
-      nextInst.value     = parseFloat(nextInst.value) + carry;
-      nextInst.isPenalty = true;
+      nextInst.value           = parseFloat((parseFloat(nextInst.value) + carry).toFixed(2));
+      nextInst.isPenalty       = true;
+      nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + interestPart).toFixed(2));
     }
   }
 
@@ -56,8 +59,8 @@ export async function POST(request, { params }) {
       type: 'success',
     });
   } else {
-    const hasOverdue = debt.installmentList.some(p => p.status === 'overdue' || p.status === 'skipped');
-    debt.status = hasOverdue ? 'overdue' : 'pending';
+    const hasOverdue   = debt.installmentList.some(p => p.status === 'overdue' || p.status === 'skipped');
+    debt.status        = hasOverdue ? 'overdue' : 'pending';
     const remainder    = dueValue - payAmount;
     const interestRate = parseFloat(debt.interestRate) || 0;
     const carry        = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));

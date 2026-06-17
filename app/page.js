@@ -1198,8 +1198,11 @@ export default function App() {
               if (!['paid','partial'].includes(inst.status)) return;
               if (!inst.paidDate?.startsWith(thisMonth)) return;
               const paid = inst.paidAmount ?? inst.value;
-              const juros = (inst.penaltyApplied && inst.penaltyRate > 0)
-                ? Math.max(0, inst.value - inst.originalValue) : 0;
+              let juros = 0;
+              if (inst.penaltyApplied && inst.penaltyRate > 0) {
+                juros += Math.max(0, (inst.value || 0) - (inst.originalValue || 0));
+              }
+              juros += (inst.carriedInterest || 0);
               rows.push({ name: d.name, product: d.product, inst: `${inst.number}/${d.installments}`,
                 paid, juros, date: inst.paidDate, status: inst.status });
             });
@@ -1434,12 +1437,19 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
 
   const firstPending = debt.installmentList?.find(i=>!['paid','partial','skipped'].includes(i.status));
 
-  // Soma apenas os juros de mora cobrados pelo scheduler (penaltyApplied + penaltyRate > 0)
-  // parcelas com isPenalty mas sem penaltyRate são carry-over de pagamento parcial (não conta)
+  // Juros já pagos = juros do scheduler (penaltyRate) + juros carregados de skip/parcial (carriedInterest)
   const jurosJaPagos = (debt.installmentList || []).reduce((sum, inst) => {
-    if (!['paid','partial'].includes(inst.status)) return sum;
-    if (!inst.penaltyApplied || !(inst.penaltyRate > 0)) return sum;
-    return sum + Math.max(0, inst.value - inst.originalValue);
+    if (!['paid', 'partial'].includes(inst.status)) return sum;
+    let interest = 0;
+    // Juros aplicados pelo scheduler nesta própria parcela (5+ dias de atraso)
+    if (inst.penaltyApplied && inst.penaltyRate > 0) {
+      interest += Math.max(0, (inst.value || 0) - (inst.originalValue || 0));
+    }
+    // Juros carregados de parcela anterior (skip ou pagamento parcial)
+    if ((inst.carriedInterest || 0) > 0) {
+      interest += inst.carriedInterest;
+    }
+    return sum + interest;
   }, 0);
 
   return (

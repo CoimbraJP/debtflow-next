@@ -31,10 +31,12 @@ export async function POST(request, { params }) {
   inst.overdueSent    = true;
 
   // Transfere valor + juros para a próxima parcela em aberto
+  // e registra separadamente a porção de juros para rastreamento
   const nextInst = debt.installmentList.find((p, j) => j > i && !['paid', 'partial', 'skipped'].includes(p.status));
   if (nextInst) {
-    nextInst.value     = parseFloat(nextInst.value) + carry;
-    nextInst.isPenalty = true;
+    nextInst.value           = parseFloat((parseFloat(nextInst.value) + carry).toFixed(2));
+    nextInst.isPenalty       = true;
+    nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + interest).toFixed(2));
   }
 
   // Registra histórico
