@@ -68,7 +68,7 @@ function openWaMe(phone, text) {
 // ── Status badge ──────────────────────────────────────────────────────────
 function StatusBadge({ debt, today }) {
   if (debt.status === 'paid') return <span className="badge muted"><span className="badge-dot"></span>Quitado</span>;
-  const next = debt.installmentList?.find(i => i.status !== 'paid');
+  const next = debt.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
   if (!next) return <span className="badge muted"><span className="badge-dot"></span>Sem parcelas</span>;
   const diff = daysDiff(today, next.dueDate);
   if (diff < 0)  return <span className="badge danger"><span className="badge-dot"></span>{Math.abs(diff)}d atrasado</span>;
@@ -180,6 +180,7 @@ export default function App() {
     if (!f.installments || parseInt(f.installments) < 1)            errs.installments = 'Mínimo 1 parcela';
     if (!f.dueDay || parseInt(f.dueDay) < 1 || parseInt(f.dueDay) > 28) errs.dueDay  = 'Entre 1 e 28';
     if (!f.startDate)                                               errs.startDate    = 'Data obrigatória';
+  if (!f.phone?.trim())                                             errs.phone        = 'WhatsApp obrigatório';
     return errs;
   }
 
@@ -195,7 +196,7 @@ export default function App() {
       name: debt.name, phone: debt.phone || '', address: debt.address || '',
       product: debt.product, total: debt.total, installments: debt.installments,
       dueDay: debt.dueDay, interestRate: debt.interestRate,
-      startDate: debt.createdAt, notes: debt.notes || '',
+      startDate: debt.createdAt ? String(debt.createdAt).slice(0,10) : today, notes: debt.notes || '',
       paidInstallments: '',  // não preenchemos na edição
     });
     setFormErrors({});
@@ -293,6 +294,37 @@ export default function App() {
     }
   }
 
+  // ── Não Pagou ─────────────────────────────────────────────────────────
+  async function skipPayment(debt, inst, idx) {
+    try {
+      const r = await api(`/api/debts/${debt.id}/skip/${idx}`, { method: 'POST' });
+      if (r?.ok) {
+        const updated = await r.json();
+        toast(`Parcela ${inst.number} de ${debt.name}: não pagamento registrado.`, 'warning', '❌ Não Pagou');
+        if (sideDebt?.id === debt.id) setSideDebt(updated);
+        fetchAll();
+      }
+    } catch(e) {
+      toast('Erro ao registrar não pagamento', 'danger', 'Erro');
+    }
+  }
+
+  function confirmSkipPayment(debt, inst, idx) {
+    const instValue = Number(inst.value||0);
+    const rate = Number(debt.interestRate||0);
+    const interest = instValue * rate / 100;
+    const carry = instValue + interest;
+    function fmtN(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    setGcData({
+      title: '❌ Registrar Não Pagamento',
+      style: 'danger',
+      msg: `<strong>${debt.name}</strong> não pagou a parcela ${inst.number}/${debt.installments}.<br><br>Valor: <strong>R$ ${fmtN(instValue)}</strong><br>Juros (${rate}%): R$ ${fmtN(interest)}<br>Total a transferir: <strong>R$ ${fmtN(carry)}</strong><br><br>Este valor será somado à próxima parcela.`,
+      label: '❌ Confirmar — Não Pagou',
+      fn: () => skipPayment(debt, inst, idx),
+    });
+    setGcModal(true);
+  }
+
   // ── Settings ───────────────────────────────────────────────────────────
   async function saveSettings() {
     setBtnLoading(b => ({...b, settings: true}));
@@ -387,8 +419,10 @@ export default function App() {
     let totalOpen = 0, received = 0, overdueCount = 0, upcomingCount = 0;
     debts.forEach(d => {
       d.installmentList?.forEach(i => {
-        if (i.status === 'paid') {
-          if (i.paidDate?.startsWith(thisMonth)) received += i.value;
+        if (i.status === 'paid' || i.status === 'partial') {
+          if (i.paidDate?.startsWith(thisMonth)) received += (i.paidAmount ?? i.value);
+        } else if (i.status === 'skipped') {
+          // saldo transferido para próxima parcela, não conta como aberto nem recebido
         } else {
           totalOpen += i.value;
           const diff = daysDiff(today, i.dueDate);
@@ -409,7 +443,7 @@ export default function App() {
     if (filter === 'overdue') return d.status === 'overdue';
     if (filter === 'pending') return d.status === 'pending';
     if (filter === 'upcoming') {
-      const next = d.installmentList?.find(i => i.status !== 'paid');
+      const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
       if (!next) return false;
       const diff = daysDiff(today, next.dueDate);
       return diff >= 0 && diff <= 5;
@@ -425,7 +459,7 @@ export default function App() {
     const items = [];
     debts.forEach(debt => {
       debt.installmentList?.forEach((inst, idx) => {
-        if (inst.status === 'paid') return;
+        if (['paid','partial','skipped'].includes(inst.status)) return;
         const d    = new Date(inst.dueDate + 'T00:00:00');
         const diff = daysDiff(today, inst.dueDate);
         if ((d.getFullYear() === year && d.getMonth() === month) || diff < 0) {
@@ -448,9 +482,9 @@ export default function App() {
       });
     }
     debts.forEach(d => d.installmentList?.forEach(i => {
-      if (i.status === 'paid' && i.paidDate) {
+      if ((i.status === 'paid' || i.status === 'partial') && i.paidDate) {
         const m = months.find(mo => i.paidDate.startsWith(mo.key));
-        if (m) m.value += i.value;
+        if (m) m.value += (i.paidAmount ?? i.value);
       }
     }));
     return { months, maxBar: Math.max(...months.map(m => m.value), 1) };
@@ -679,7 +713,7 @@ export default function App() {
                         {debts.slice(0, 6).length === 0 ? (
                           <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>Nenhuma dívida cadastrada</td></tr>
                         ) : debts.slice(0, 6).map(d => {
-                          const next = d.installmentList?.find(i => i.status !== 'paid');
+                          const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
                           return (
                             <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':''}>
                               <td><div className="table-name"><div className="table-avatar" style={{ background: avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{d.phone}</div>}</div></div></td>
@@ -738,7 +772,7 @@ export default function App() {
                     {filteredDebts.map(d => {
                       const paidN = d.installmentList?.filter(i => i.status==='paid').length || 0;
                       const totalN = d.installmentList?.length || 0;
-                      const nextInst = d.installmentList?.find(i => i.status !== 'paid');
+                      const nextInst = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
                       const diff = nextInst ? daysDiff(today, nextInst.dueDate) : null;
                       let cardCls = 'debt-mobile-card';
                       if (diff !== null && diff < 0) cardCls += ' overdue';
@@ -940,7 +974,10 @@ export default function App() {
                   <div className="form-group" key={k} style={{marginBottom:16}}>
                     <label className="form-label">{l}</label>
                     <textarea className="form-control" rows={4} value={settForm[k]||''} onChange={e => setSettForm(s=>({...s,[k]:e.target.value}))} />
-                    <span className="form-hint">Variáveis: {'{nome}'}, {'{valor}'}, {'{vencimento}'}, {'{produto}'}, {'{parcela}'}, {'{total_parcelas}'}{k==='msgOverdue'?`, {'{valor_com_juros}'}, {'{dias_atraso}'}`:''}  </span>
+                    <div style={{display:'flex',alignItems:'center',gap:12,marginTop:4,flexWrap:'wrap'}}>
+                      <span className="form-hint" style={{flex:1}}>Variáveis: {'{nome}'}, {'{valor}'}, {'{vencimento}'}, {'{produto}'}, {'{parcela}'}, {'{total_parcelas}'}{k==='msgOverdue'?`, {'{valor_com_juros}'}, {'{dias_atraso}'}`:''}  </span>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'2px 8px',minHeight:'unset',whiteSpace:'nowrap'}} onClick={() => setSettForm(s=>({...s,[k]:DEFAULT_SETTINGS[k]}))}>↺ Redefinir padrão</button>
+                    </div>
                   </div>
                 ))}
                 <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
@@ -1003,7 +1040,7 @@ export default function App() {
       {/* ── SIDE PANEL: Detalhe da Dívida ─────────────────────── */}
       <div className={`side-panel-backdrop${sideDebt?' open':''}`} onClick={e => { if (e.target === e.currentTarget) setSideDebt(null); }}>
         <div className="side-panel">
-          {sideDebt && <DebtPanel debt={sideDebt} today={today} onClose={() => setSideDebt(null)} onEdit={d => { setSideDebt(null); setTimeout(()=>openEditDebt(d),300); }} onPay={openPayModal} onDelete={d => { setSideDebt(null); setDelDebt(d); setDelModal(true); }} onWhatsApp={sendWhatsApp} />}
+          {sideDebt && <DebtPanel debt={sideDebt} today={today} onClose={() => setSideDebt(null)} onEdit={d => { setSideDebt(null); setTimeout(()=>openEditDebt(d),300); }} onPay={openPayModal} onSkip={confirmSkipPayment} onDelete={d => { setSideDebt(null); setDelDebt(d); setDelModal(true); }} onWhatsApp={sendWhatsApp} />}
         </div>
       </div>
 
@@ -1016,8 +1053,9 @@ export default function App() {
             {formErrors.name && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.name}</span>}
           </div>
           <div className="form-group">
-            <label className="form-label">WhatsApp</label>
-            <input className="form-control" type="tel" placeholder="5511999999999" value={debtForm.phone||''} onChange={e=>setDebtForm(f=>({...f,phone:e.target.value}))} />
+            <label className="form-label">WhatsApp <span style={{color:'var(--color-danger)'}}>*</span></label>
+            <input className={`form-control${formErrors.phone ? ' input-error' : ''}`} type="tel" placeholder="5511999999999" value={debtForm.phone||''} onChange={e=>{setDebtForm(f=>({...f,phone:e.target.value}));if(formErrors.phone)setFormErrors(fe=>({...fe,phone:undefined}));}} />
+            {formErrors.phone && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.phone}</span>}
           </div>
           <div className="form-group full-width">
             <label className="form-label">Endereço</label>
@@ -1247,17 +1285,17 @@ function ActivityList({ items }) {
   );
 }
 
-function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }) {
-  const paid     = debt.installmentList?.filter(i=>i.status==='paid').length||0;
+function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWhatsApp }) {
+  const paid     = debt.installmentList?.filter(i=>['paid','partial','skipped'].includes(i.status)).length||0;
   const total    = debt.installmentList?.length||0;
-  const paidAmt  = debt.installmentList?.filter(i=>i.status==='paid').reduce((s,i)=>s+i.value,0)||0;
-  const openAmt  = debt.installmentList?.filter(i=>i.status!=='paid').reduce((s,i)=>s+i.value,0)||0;
+  const paidAmt  = debt.installmentList?.filter(i=>i.status==='paid'||i.status==='partial').reduce((s,i)=>s+(i.paidAmount??i.value),0)||0;
+  const openAmt  = debt.installmentList?.filter(i=>!['paid','partial','skipped'].includes(i.status)).reduce((s,i)=>s+i.value,0)||0;
   const progress = total>0?(paid/total*100):0;
 
   function fmt(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function fmtDate(s) { if(!s) return '—'; const[y,m,d]=s.split('-'); return `${d}/${m}/${y}`; }
 
-  const firstPending = debt.installmentList?.find(i=>i.status!=='paid');
+  const firstPending = debt.installmentList?.find(i=>!['paid','partial','skipped'].includes(i.status));
 
   return (
     <>
@@ -1331,6 +1369,11 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
               💰 Registrar Pagto
             </button>
           )}
+          {firstPending && (
+            <button className="btn btn-danger btn-sm" onClick={() => onSkip(debt, firstPending, debt.installmentList?.indexOf(firstPending))} style={{flex:1,minWidth:100}}>
+              ❌ Não Pagou
+            </button>
+          )}
           <button className="btn btn-danger btn-sm" onClick={() => onDelete(debt)} style={{flex:'0 0 auto'}}>
             🗑
           </button>
@@ -1340,29 +1383,60 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onDelete, onWhatsApp }
         <div style={{fontSize:13,fontWeight:600,marginBottom:8,color:'var(--text-secondary)'}}>Parcelas</div>
         <div style={{display:'flex',flexDirection:'column',gap:6}}>
           {debt.installmentList?.map((inst,idx) => {
-            const isPaid = inst.status==='paid';
+            const isPaid    = inst.status==='paid';
+            const isPartial = inst.status==='partial';
+            const isSkipped = inst.status==='skipped';
+            const isDone    = isPaid || isPartial || isSkipped;
             function fmtD(s){if(!s)return'—';const[y,m,d]=s.split('-');return`${d}/${m}/${y}`;}
+            const rowBg     = isPaid ? 'rgba(0,200,83,.06)' : isPartial ? 'rgba(255,165,0,.08)' : isSkipped ? 'rgba(255,71,87,.06)' : 'var(--bg-elevated)';
+            const rowBorder = isPaid ? 'rgba(0,200,83,.2)' : isPartial ? 'rgba(255,165,0,.3)' : isSkipped ? 'rgba(255,71,87,.2)' : 'var(--border-default)';
+            const dotBg     = isPaid ? 'var(--color-success)' : isPartial ? '#f5a623' : isSkipped ? 'var(--color-danger)' : 'var(--border-default)';
+            const dotContent = isPaid ? '✓' : isPartial ? '~' : isSkipped ? '✗' : idx+1;
             return (
               <div key={idx} style={{
-                display:'flex',alignItems:'center',gap:10,
+                display:'flex',alignItems:'flex-start',gap:10,
                 padding:'10px 12px',
-                background: isPaid ? 'rgba(0,200,83,.06)' : 'var(--bg-elevated)',
-                border: `1px solid ${isPaid ? 'rgba(0,200,83,.2)' : 'var(--border-default)'}`,
+                background: rowBg,
+                border: `1px solid ${rowBorder}`,
                 borderRadius:'var(--radius-md)',
               }}>
                 <div style={{
-                  width:20,height:20,borderRadius:'50%',flexShrink:0,
-                  background: isPaid ? 'var(--color-success)' : 'var(--border-default)',
+                  width:20,height:20,borderRadius:'50%',flexShrink:0,marginTop:2,
+                  background: dotBg,
                   display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,color:'#fff',fontWeight:700
-                }}>{isPaid ? '✓' : idx+1}</div>
+                }}>{dotContent}</div>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:600}}>Parcela {idx+1} · R$ {fmt(inst.value)}</div>
-                  <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtD(inst.dueDate)}{isPaid && inst.paidAt ? ` · Pago em ${fmtD(inst.paidAt)}` : ''}</div>
-
+                  <div style={{fontSize:13,fontWeight:600}}>
+                    Parcela {idx+1}
+                    {isPartial && <span style={{color:'#f5a623',marginLeft:6,fontSize:11,fontWeight:400}}>• Pagamento Parcial</span>}
+                    {isSkipped && <span style={{color:'var(--color-danger)',marginLeft:6,fontSize:11,fontWeight:400}}>• Não Pagou</span>}
+                  </div>
+                  {isPaid && (
+                    <div style={{fontSize:11,color:'var(--color-success)'}}>
+                      Pago: R$ {fmt(inst.paidAmount??inst.value)}{inst.paidDate ? ` · em ${fmtD(inst.paidDate)}` : ''}
+                    </div>
+                  )}
+                  {isPartial && (
+                    <>
+                      <div style={{fontSize:11,color:'var(--text-muted)'}}>Valor: R$ {fmt(inst.value)} · Venc: {fmtD(inst.dueDate)}</div>
+                      <div style={{fontSize:11,color:'#f5a623',fontWeight:600}}>Pago: R$ {fmt(inst.paidAmount)}</div>
+                      <div style={{fontSize:11,color:'var(--text-muted)'}}>Saldo transferido: R$ {fmt(inst.value-(inst.paidAmount||0))} + juros</div>
+                    </>
+                  )}
+                  {isSkipped && (
+                    <div style={{fontSize:11,color:'var(--color-danger)'}}>R$ {fmt(inst.value)} + juros transferidos para próxima</div>
+                  )}
+                  {!isDone && (
+                    <div style={{fontSize:11,color:'var(--text-muted)'}}>Vence: {fmtD(inst.dueDate)} · R$ {fmt(inst.value)}</div>
+                  )}
                 </div>
-                {!isPaid && (
-                  <button className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
-                    onClick={() => onPay(debt, inst, idx)}>Pagar</button>
+                {!isDone && (
+                  <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
+                    <button className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
+                      onClick={() => onPay(debt, inst, idx)}>Pagar</button>
+                    <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
+                      onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
+                  </div>
                 )}
               </div>
             );
