@@ -229,8 +229,12 @@ export default function App() {
         setDebtModal(false);
         fetchAll();
       } else {
-        const e = await r.json();
-        toast(e.error || 'Erro ao salvar', 'danger', 'Erro');
+        try {
+          const e = await r.json();
+          toast(e.error || 'Erro ao salvar', 'danger', 'Erro');
+        } catch {
+          toast(`Erro ao salvar (${r.status})`, 'danger', 'Erro');
+        }
       }
     } finally {
       setBtnLoading(b => ({...b, save: false}));
@@ -1357,24 +1361,24 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+        {/* Action buttons — 3 symmetric + delete */}
+        <div style={{display:'flex',gap:6,marginBottom:16,alignItems:'stretch'}}>
           {debt.phone && firstPending && (
-            <button className="btn btn-success btn-sm" onClick={() => onWhatsApp(debt, firstPending)} style={{flex:1,minWidth:120}}>
+            <button className="btn btn-success btn-sm" onClick={() => onWhatsApp(debt, firstPending)} style={{flex:1,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
               Cobrar
             </button>
           )}
           {firstPending && (
-            <button className="btn btn-primary btn-sm" onClick={() => onPay(debt, firstPending, debt.installmentList?.indexOf(firstPending))} style={{flex:1,minWidth:100}}>
-              💰 Registrar Pagto
+            <button className="btn btn-primary btn-sm" onClick={() => onPay(debt, firstPending, debt.installmentList?.indexOf(firstPending))} style={{flex:1,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+              Pagamento
             </button>
           )}
           {firstPending && (
-            <button className="btn btn-danger btn-sm" onClick={() => onSkip(debt, firstPending, debt.installmentList?.indexOf(firstPending))} style={{flex:1,minWidth:100}}>
-              ❌ Não Pagou
+            <button className="btn btn-danger btn-sm" onClick={() => onSkip(debt, firstPending, debt.installmentList?.indexOf(firstPending))} style={{flex:1,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+              Não Pagou
             </button>
           )}
-          <button className="btn btn-danger btn-sm" onClick={() => onDelete(debt)} style={{flex:'0 0 auto'}}>
+          <button className="btn btn-danger btn-sm" onClick={() => onDelete(debt)} style={{flex:'0 0 auto',padding:'0 10px'}}>
             🗑
           </button>
         </div>
@@ -1432,9 +1436,9 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                 </div>
                 {!isDone && (
                   <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
-                    <button className="btn btn-ghost btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
+                    <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
                       onClick={() => onPay(debt, inst, idx)}>Pagar</button>
-                    <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
+                    <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
                       onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
                   </div>
                 )}

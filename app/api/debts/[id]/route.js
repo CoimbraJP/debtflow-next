@@ -69,7 +69,9 @@ export async function PUT(request, { params }) {
 
   if (needsRegen) {
     // Garante que createdAt é passado como string YYYY-MM-DD para generateInstallments
-    const createdAtStr = String(debt.createdAt || startDate || '').slice(0, 10);
+    // Usa startDate do body (já normalizado para YYYY-MM-DD em openEditDebt)
+    // NÃO usa debt.createdAt pois Mongoose o coerce para Date object
+    const createdAtStr = String(startDate || dbCreatedAt || '').slice(0, 10);
     const newList = generateInstallments({
       total: debt.total, installments: debt.installments,
       dueDay: debt.dueDay, createdAt: createdAtStr,
