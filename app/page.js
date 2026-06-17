@@ -1303,6 +1303,9 @@ export default function App() {
           rows.sort((a,b) => (b.date||'').localeCompare(a.date||''));
           cols = ['Cliente','Produto','Parcela','Pago em','Valor Pago','Juros Mensais'];
         }
+        const totalJurosMes = kpiPanel === 'received'
+          ? parseFloat(rows.reduce((s,r) => s + (r.juros||0), 0).toFixed(2))
+          : 0;
 
         if (kpiPanel === 'overdue') {
           title = 'Clientes Inadimplentes';
@@ -1350,6 +1353,19 @@ export default function App() {
                 </button>
               </div>
               <div className="modal-body" style={{overflowY:'auto',flex:1,padding:'12px 20px'}}>
+                {kpiPanel === 'received' && totalJurosMes > 0 && (
+                  <div style={{
+                    background:'#fffbea', border:'1.5px solid #f5a623',
+                    borderRadius:10, padding:'12px 18px', marginBottom:14,
+                    display:'flex', alignItems:'center', gap:10,
+                  }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f5a623" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span style={{fontSize:13.5, color:'#92610a'}}>
+                      Total de juros recebidos no mês:&nbsp;
+                      <strong style={{fontSize:15, color:'#b45309'}}>R$ {fmtV(totalJurosMes)}</strong>
+                    </span>
+                  </div>
+                )}
                 {rows.length === 0
                   ? <div style={{textAlign:'center',padding:32,color:'var(--text-muted)',fontSize:14}}>Nenhum registro encontrado.</div>
                   : (
