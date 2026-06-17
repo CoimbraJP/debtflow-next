@@ -1271,10 +1271,17 @@ export default function App() {
               const _rate = parseFloat(d.interestRate) || 0;
               let juros = 0;
               if (inst.status === 'partial') {
+                // Juro sobre o saldo que será transferido para a próxima parcela
                 const _saldo = Math.max(0, (inst.value||0) - (inst.paidAmount||0));
                 juros = parseFloat((_saldo * _rate / 100).toFixed(2));
-              } else if (inst.penaltyApplied && inst.penaltyRate > 0) {
-                juros = Math.max(0, (inst.value||0) - (inst.originalValue||0));
+              } else if (inst.status === 'paid') {
+                if (inst.penaltyApplied && inst.penaltyRate > 0) {
+                  // Multa do scheduler (5+ dias de atraso): valor cresceu sobre o original
+                  juros = Math.max(0, (inst.value||0) - (inst.originalValue||0));
+                } else if ((inst.carriedInterest || 0) > 0) {
+                  // Juro carregado de skip ou parcial anterior — campo gravado nas rotas skip/pay
+                  juros = inst.carriedInterest;
+                }
               }
               rows.push({ name: d.name, product: d.product, inst: `${inst.number}/${d.installments}`,
                 paid, juros, date: inst.paidDate, status: inst.status });
