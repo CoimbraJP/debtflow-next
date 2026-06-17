@@ -6,7 +6,7 @@ const PUBLIC_PATHS = ['/login', '/api/auth'];
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
 
-  // Cron job protegido por Bearer token, não por cookie
+  // Cron job
   if (pathname === '/api/cron/scheduler') {
     const authHeader = request.headers.get('authorization');
     const expected   = `Bearer ${process.env.CRON_SECRET}`;
@@ -21,7 +21,6 @@ export async function middleware(request) {
     return NextResponse.next();
   }
 
-  // Verificar cookie de sessão
   const token = request.cookies.get('df_session')?.value;
 
   if (!token) {
@@ -37,9 +36,22 @@ export async function middleware(request) {
     );
     const { payload } = await jwtVerify(token, secret);
 
-    // Propaga o tenant como header para todas as API routes
+    const role   = payload.role   || 'admin';
     const tenant = payload.tenant || 'default';
+
+    // Página /admin: somente master
+    if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+      if (role !== 'master') {
+        if (pathname.startsWith('/api/')) {
+          return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+        }
+        return NextResponse.redirect(new URL('/', request.url));
+      }
+    }
+
+    // Propaga role e tenant como headers
     const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-role',   role);
     requestHeaders.set('x-tenant', tenant);
 
     return NextResponse.next({ request: { headers: requestHeaders } });

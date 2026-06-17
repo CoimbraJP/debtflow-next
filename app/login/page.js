@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter }  from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
-  const router   = useRouter();
+  const router = useRouter();
   const [pw, setPw]         = useState('');
   const [error, setError]   = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,7 +22,12 @@ export default function LoginPage() {
 
     setLoading(false);
     if (res.ok) {
-      router.push('/');
+      const data = await res.json();
+      if (data.role === 'master') {
+        router.push('/admin');
+      } else {
+        router.push('/');
+      }
       router.refresh();
     } else {
       setError('Senha incorreta. Tente novamente.');
@@ -32,30 +37,20 @@ export default function LoginPage() {
 
   return (
     <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'var(--bg-base)',
-      padding: '20px',
+      minHeight: '100vh', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', background: 'var(--bg-base)', padding: '20px',
     }}>
       <div style={{
-        background: '#161829',
-        border: '1px solid var(--border-default)',
-        borderRadius: 'var(--radius-xl)',
-        padding: '40px',
-        width: '100%',
-        maxWidth: '380px',
+        background: '#161829', border: '1px solid var(--border-default)',
+        borderRadius: 'var(--radius-xl)', padding: '40px', width: '100%', maxWidth: '380px',
         boxShadow: 'var(--shadow-lg), 0 0 60px rgba(108,99,255,0.1)',
       }}>
-        {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <div style={{
             width: '56px', height: '56px',
             background: 'linear-gradient(135deg, var(--color-primary), var(--color-accent))',
-            borderRadius: 'var(--radius-lg)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px',
+            borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', margin: '0 auto 16px',
             boxShadow: 'var(--shadow-glow-primary)',
           }}>
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -70,42 +65,24 @@ export default function LoginPage() {
           <div className="form-group" style={{ marginBottom: '20px' }}>
             <label className="form-label" htmlFor="password">Senha de Acesso</label>
             <input
-              id="password"
-              type="password"
-              className="form-control"
-              placeholder="••••••••••"
-              value={pw}
-              onChange={e => setPw(e.target.value)}
-              required
-              autoFocus
+              id="password" type="password" className="form-control"
+              placeholder="••••••••••" value={pw}
+              onChange={e => setPw(e.target.value)} required autoFocus
             />
           </div>
 
           {error && (
             <div style={{
-              background: 'rgba(255,71,87,0.1)',
-              border: '1px solid rgba(255,71,87,0.25)',
-              borderRadius: 'var(--radius-md)',
-              padding: '10px 14px',
-              fontSize: '13px',
-              color: 'var(--color-danger)',
-              marginBottom: '20px',
-            }}>
-              {error}
-            </div>
+              background: 'rgba(255,71,87,0.1)', border: '1px solid rgba(255,71,87,0.25)',
+              borderRadius: 'var(--radius-md)', padding: '10px 14px',
+              fontSize: '13px', color: 'var(--color-danger)', marginBottom: '20px',
+            }}>{error}</div>
           )}
 
-          <button
-            type="submit"
-            className="btn btn-primary"
-            style={{ width: '100%', padding: '12px' }}
-            disabled={loading}
-          >
+          <button type="submit" className="btn btn-primary"
+            style={{ width: '100%', padding: '12px' }} disabled={loading}>
             {loading ? (
-              <>
-                <div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
-                Verificando...
-              </>
+              <><div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />Verificando...</>
             ) : 'Entrar'}
           </button>
         </form>
