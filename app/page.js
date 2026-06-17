@@ -120,7 +120,8 @@ export default function App() {
   // UX1: Button-level loading states
   const [btnLoading, setBtnLoading] = useState({});
   const [kpiPanel,   setKpiPanel]   = useState(null);
-  const [payStep,    setPayStep]    = useState('enter'); // 'enter' | 'preview' // null | 'received' | 'overdue' | 'upcoming'
+  const [payStep,    setPayStep]    = useState('enter'); // 'enter' | 'preview'
+  const [sortOrder,  setSortOrder]  = useState('date');   // 'date' | 'alpha' // null | 'received' | 'overdue' | 'upcoming'
   // UX5: Form validation errors
   const [formErrors, setFormErrors] = useState({});
 
@@ -452,21 +453,36 @@ export default function App() {
   }, [debts, today, thisMonth]);
 
   // ── Filtered debts ─────────────────────────────────────────────────────
-  const filteredDebts = useMemo(() => debts.filter(d => {
-    const matchSearch = !search || d.name.toLowerCase().includes(search.toLowerCase()) || d.product.toLowerCase().includes(search.toLowerCase());
-    if (!matchSearch) return false;
-    if (filter === 'all')     return true;
-    if (filter === 'paid')    return d.status === 'paid';
-    if (filter === 'overdue') return d.status === 'overdue';
-    if (filter === 'pending') return d.status === 'pending';
-    if (filter === 'upcoming') {
-      const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
-      if (!next) return false;
-      const diff = daysDiff(today, next.dueDate);
-      return diff >= 0 && diff <= 5;
-    }
-    return true;
-  }), [debts, search, filter, today]);
+  const filteredDebts = useMemo(() => {
+    const list = debts.filter(d => {
+      const matchSearch = !search || d.name.toLowerCase().includes(search.toLowerCase()) || d.product.toLowerCase().includes(search.toLowerCase());
+      if (!matchSearch) return false;
+      if (filter === 'all')     return true;
+      if (filter === 'paid')    return d.status === 'paid';
+      if (filter === 'overdue') return d.status === 'overdue';
+      if (filter === 'pending') return d.status === 'pending';
+      if (filter === 'upcoming') {
+        const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
+        if (!next) return false;
+        const diff = daysDiff(today, next.dueDate);
+        return diff >= 0 && diff <= 5;
+      }
+      return true;
+    });
+    return list.sort((a, b) => {
+      if (sortOrder === 'alpha') return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+      // date: mais recentes primeiro
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
+  }, [debts, search, filter, today, sortOrder]);
+
+  // Debts ordenados para o dashboard (todos, sem filtro de busca/status)
+  const sortedDebts = useMemo(() => [
+    ...debts
+  ].sort((a, b) => {
+    if (sortOrder === 'alpha') return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+  }), [debts, sortOrder]);
 
   // ── Calendar items ─────────────────────────────────────────────────────
   const now   = new Date();
@@ -726,14 +742,19 @@ export default function App() {
                 <div>
                   <div className="section-header">
                     <div><div className="section-title">Dívidas Recentes</div><div className="section-subtitle">Últimas movimentações</div></div>
-                    <button className="btn btn-ghost btn-sm" onClick={() => navigate('debts')}>Ver todas</button>
+                    <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                      <button title={sortOrder==='alpha'?'Ordenar por data':'Ordenar A-Z'} onClick={() => setSortOrder(s => s==='date'?'alpha':'date')} style={{display:'flex',alignItems:'center',gap:4,padding:'4px 10px',fontSize:11,fontWeight:600,border:'1px solid var(--border-default)',borderRadius:'var(--radius-sm)',background:'var(--bg-elevated)',color:'var(--text-secondary)',cursor:'pointer',whiteSpace:'nowrap'}}>
+                        {sortOrder==='alpha' ? <>&#128197; Data</> : <>A&#8202;→&#8202;Z</>}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => navigate('debts')}>Ver todas</button>
+                    </div>
                   </div>
                   <div className="table-container">
                     <table className="data-table"><thead><tr><th>Devedor</th><th>Produto</th><th>Valor Total</th><th>Próx. Vencimento</th><th>Status</th></tr></thead>
                       <tbody>
-                        {debts.slice(0, 6).length === 0 ? (
+                        {sortedDebts.slice(0, 6).length === 0 ? (
                           <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>Nenhuma dívida cadastrada</td></tr>
-                        ) : debts.slice(0, 6).map(d => {
+                        ) : sortedDebts.slice(0, 6).map(d => {
                           const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
                           return (
                             <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':''}>
@@ -775,10 +796,13 @@ export default function App() {
           {/* ══ DÍVIDAS ════════════════════════════════════════════ */}
           {page === 'debts' && (
             <section>
-              <div className="filter-bar">
+              <div className="filter-bar" style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                 {[['all','Todas'],['pending','Pendentes'],['overdue','Em Atraso'],['upcoming','Vence em breve'],['paid','Liquidados']].map(([v,l]) => (
                   <button key={v} className={`filter-pill${filter===v?' active':''}`} onClick={() => setFilter(v)}>{l}</button>
                 ))}
+                <button title={sortOrder==='alpha'?'Ordenar por data':'Ordenar A-Z'} onClick={() => setSortOrder(s => s==='date'?'alpha':'date')} style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:4,padding:'4px 12px',fontSize:11,fontWeight:600,border:'1px solid var(--border-default)',borderRadius:'var(--radius-sm)',background:'var(--bg-elevated)',color:'var(--text-secondary)',cursor:'pointer',whiteSpace:'nowrap'}}>
+                  {sortOrder==='alpha' ? <>&#128197; Data</> : <>A&#8202;→&#8202;Z</>}
+                </button>
               </div>
               {/* ── Mobile: card list ── */}
               <div className="mobile-only">
