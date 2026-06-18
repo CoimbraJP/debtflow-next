@@ -289,7 +289,16 @@ export default function App() {
         fetchAll();
         // Fix 3 — Parabéns quando o cliente quita todas as parcelas
         if (updated.status === 'paid') {
-          setTimeout(() => setCelebModal(debt.name), 600);
+          const totalPago  = (updated.installmentList || [])
+            .filter(i => i.status === 'paid' && !i.creditPaid)
+            .reduce((s, i) => s + (i.paidAmount || 0), 0);
+          const totalJuros = Math.max(0, parseFloat((totalPago - (updated.total || 0)).toFixed(2)));
+          setTimeout(() => setCelebModal({
+            name:       debt.name,
+            product:    updated.product,
+            totalPago:  parseFloat(totalPago.toFixed(2)),
+            totalJuros,
+          }), 600);
         }
       }
     } finally {
@@ -1431,21 +1440,44 @@ export default function App() {
       </Modal>
 
       {/* ── MODAL: Parabéns — Cliente Finalizado (Fix 3) ──────────── */}
-      <Modal open={!!celebModal} onClose={() => setCelebModal(null)} title="🎉 Cliente Finalizado!" maxWidth={380}>
-        <div style={{ textAlign:'center', padding:'8px 0 20px' }}>
-          <div style={{ fontSize:52, marginBottom:12, lineHeight:1 }}>🎉</div>
-          <p style={{ color:'var(--text-primary)', fontSize:15, fontWeight:600, marginBottom:6 }}>
-            Parabéns! <strong>{celebModal}</strong> quitou todas as parcelas!
-          </p>
-          <p style={{ color:'var(--text-secondary)', fontSize:13 }}>
-            Todas as parcelas foram pagas com sucesso.
-          </p>
-        </div>
-        <div className="modal-footer" style={{ justifyContent:'center' }}>
-          <button className="btn btn-accent" onClick={() => setCelebModal(null)} style={{ minWidth:150 }}>
-            🎉 Perfeito!
-          </button>
-        </div>
+      <Modal open={!!celebModal} onClose={() => setCelebModal(null)} title="🎉 Cliente Finalizado!" maxWidth={400}>
+        {celebModal && (() => {
+          const fmtC = v => Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+          return (
+            <>
+              <div style={{ textAlign:'center', padding:'4px 0 16px' }}>
+                <div style={{ fontSize:48, marginBottom:10, lineHeight:1 }}>🎉</div>
+                <p style={{ color:'var(--text-primary)', fontSize:15, fontWeight:700, marginBottom:4 }}>
+                  Parabéns! <strong>{celebModal.name}</strong>
+                </p>
+                <p style={{ color:'var(--text-secondary)', fontSize:13, marginBottom:16 }}>
+                  quitou todas as parcelas com sucesso!
+                </p>
+                <div style={{ background:'var(--bg-card)', borderRadius:10, padding:'12px 16px', textAlign:'left', display:'flex', flexDirection:'column', gap:8 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
+                    <span style={{ color:'var(--text-secondary)' }}>Produto</span>
+                    <strong style={{ color:'var(--text-primary)' }}>{celebModal.product}</strong>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
+                    <span style={{ color:'var(--text-secondary)' }}>Total pago</span>
+                    <strong style={{ color:'var(--color-success)' }}>R$ {fmtC(celebModal.totalPago)}</strong>
+                  </div>
+                  {celebModal.totalJuros > 0 && (
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
+                      <span style={{ color:'var(--text-secondary)' }}>Total de juros</span>
+                      <strong style={{ color:'#f5a623' }}>R$ {fmtC(celebModal.totalJuros)}</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="modal-footer" style={{ justifyContent:'center' }}>
+                <button className="btn btn-accent" onClick={() => setCelebModal(null)} style={{ minWidth:150 }}>
+                  🎉 Perfeito!
+                </button>
+              </div>
+            </>
+          );
+        })()}
       </Modal>
 
       {/* ── TOASTS ───────────────────────────────────────────────── */}
