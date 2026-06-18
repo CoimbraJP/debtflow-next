@@ -1177,8 +1177,9 @@ export default function App() {
           {!editId && (
             <div className="form-group">
               <label className="form-label">Data de Início</label>
-              <input className="form-control" type="text" value={debtForm.startDate ? `01/${debtForm.startDate.slice(5,7)}/${debtForm.startDate.slice(0,4)}` : ''} readOnly disabled style={{opacity:.7,cursor:'default'}} />
-              <span className="form-hint">Sempre o 1º dia do mês atual — ajuste automático</span>
+              <input className="form-control" type="text"
+                value={debtForm.startDate ? ['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'][parseInt(debtForm.startDate.slice(5,7))-1] || '' : ''}
+                readOnly disabled style={{opacity:.85,cursor:'default',fontWeight:600,letterSpacing:1}} />
             </div>
           )}
           <div className="form-group full-width">
@@ -1734,11 +1735,11 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
           {firstPending && (() => {
             const fpIdx    = debt.installmentList?.indexOf(firstPending);
             const isLastFP = !debt.installmentList?.find((p,j) => j > fpIdx && !['paid','partial','skipped'].includes(p.status));
-            return (
-              <button className="btn btn-danger btn-sm" onClick={() => onSkip(debt, firstPending, fpIdx)} disabled={isLastFP} title={isLastFP ? 'Última parcela deve ser paga integralmente' : undefined} style={{flex:1,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',opacity:isLastFP?.5:1,cursor:isLastFP?'not-allowed':'pointer'}}>
+            return !isLastFP ? (
+              <button className="btn btn-danger btn-sm" onClick={() => onSkip(debt, firstPending, fpIdx)} style={{flex:1,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
                 Não Pagou
               </button>
-            );
+            ) : null;
           })()}
           <button className="btn btn-danger btn-sm" onClick={() => onDelete(debt)} style={{flex:'0 0 auto',padding:'0 10px'}}>
             🗑
@@ -1809,14 +1810,10 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                   <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
                     <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
                       onClick={() => onPay(debt, inst, idx)}>Pagar</button>
-                    {(() => {
-                      const isLastInst = !debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status));
-                      return (
-                        <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52,opacity:isLastInst?.5:1,cursor:isLastInst?'not-allowed':'pointer'}}
-                          disabled={isLastInst} title={isLastInst?'Última parcela deve ser paga integralmente':undefined}
-                          onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
-                      );
-                    })()}
+                    {!debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status)) ? null : (
+                      <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
+                        onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
+                    )}
                   </div>
                 )}
               </div>
