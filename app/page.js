@@ -176,21 +176,24 @@ export default function App() {
 
   // ── CRUD Dívidas ───────────────────────────────────────────────────────
   // UX5: Validate debt form fields
-  function validateDebtForm(f) {
+  function validateDebtForm(f, isEdit = false) {
     const errs = {};
-    if (!f.name?.trim())                                            errs.name         = 'Nome obrigatório';
-    if (!f.product?.trim())                                         errs.product      = 'Produto obrigatório';
-    if (!f.total || parseFloat(f.total) <= 0)                       errs.total        = 'Valor deve ser maior que zero';
-    if (!f.installments || parseInt(f.installments) < 1)            errs.installments = 'Mínimo 1 parcela';
-    if (!f.dueDay || parseInt(f.dueDay) < 1 || parseInt(f.dueDay) > 28) errs.dueDay  = 'Entre 1 e 28';
-    if (!f.startDate)                                               errs.startDate    = 'Data obrigatória';
-  if (!f.phone?.trim())                                             errs.phone        = 'WhatsApp obrigatório';
+    if (!f.name?.trim())    errs.name    = 'Nome obrigatório';
+    if (!f.product?.trim()) errs.product = 'Produto obrigatório';
+    if (!f.phone?.trim())   errs.phone   = 'WhatsApp obrigatório';
+    if (!isEdit) {
+      // Campos financeiros só validados na criação
+      if (!f.total || parseFloat(f.total) <= 0)                           errs.total        = 'Valor deve ser maior que zero';
+      if (!f.installments || parseInt(f.installments) < 1)                errs.installments = 'Mínimo 1 parcela';
+      if (!f.dueDay || parseInt(f.dueDay) < 1 || parseInt(f.dueDay) > 28) errs.dueDay       = 'Entre 1 e 28';
+    }
     return errs;
   }
 
   function openNewDebt() {
     setEditId(null);
-    setDebtForm({ ...EMPTY_FORM, startDate: today, interestRate: settings.defaultInterest || 10 });
+    const firstOfMonth = today.slice(0, 7) + '-01';
+    setDebtForm({ ...EMPTY_FORM, startDate: firstOfMonth, interestRate: settings.defaultInterest || 10 });
     setFormErrors({});
     setDebtModal(true);
   }
@@ -208,7 +211,7 @@ export default function App() {
   }
   async function saveDebt() {
     const f = debtForm;
-    const errs = validateDebtForm(f);
+    const errs = validateDebtForm(f, !!editId);
     if (Object.keys(errs).length > 0) {
       setFormErrors(errs);
       toast('Preencha todos os campos obrigatórios', 'danger', 'Campos inválidos');
@@ -216,13 +219,10 @@ export default function App() {
     }
     setBtnLoading(b => ({...b, save: true}));
     try {
-      const body = {
-        ...f,
-        total:            parseFloat(f.total),
-        installments:     parseInt(f.installments),
-        dueDay:           parseInt(f.dueDay),
-        paidInstallments: parseInt(f.paidInstallments) || 0,
-      };
+      // Fix 2: PUT envia APENAS campos cadastrais — sem recalcular parcelas/juros
+      const body = editId
+        ? { name: f.name, phone: f.phone || '', address: f.address || '', product: f.product, notes: f.notes || '' }
+        : { ...f, total: parseFloat(f.total), installments: parseInt(f.installments), dueDay: parseInt(f.dueDay), paidInstallments: parseInt(f.paidInstallments) || 0 };
       const r = editId
         ? await api(`/api/debts/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
         : await api('/api/debts', { method: 'POST', body: JSON.stringify(body) });
@@ -266,8 +266,15 @@ export default function App() {
     setPayModal(true);
   }
   function handlePaySubmit() {
-    const dueValue = parseFloat(payInfo.inst?.value) || 0;
-    const payAmt   = parseFloat(payInfo.payAmount)   || 0;
+    const dueValue     = parseFloat(payInfo.inst?.value) || 0;
+    const payAmt       = parseFloat(payInfo.payAmount)   || 0;
+    // Fix 3: não permite zero/negativo
+    if (payAmt <= 0) return;
+    // Fix 1: última parcela deve ser paga integralmente
+    const pendingAfter = payInfo.debt?.installmentList?.filter((p, j) => j > payInfo.idx && !['paid','partial','skipped'].includes(p.status)) || [];
+    const isLastPending = pendingAfter.length === 0;
+    if (isLastPending && payAmt < dueValue - 0.009) return; // bloqueado pela UI
+    // Mostra preview só para pagamento parcial em parcela não-final
     if (payAmt > 0 && payAmt < dueValue - 0.009 && payStep === 'enter') {
       setPayStep('preview');
       return;
@@ -1105,6 +1112,12 @@ export default function App() {
 
       {/* ── MODAL: Nova / Editar Dívida ─────────────────────────── */}
       <Modal open={debtModal} onClose={() => setDebtModal(false)} title={editId ? 'Editar Dívida' : 'Nova Dívida'} subtitle="Preencha os dados do devedor e da dívida" maxWidth={640}>
+        {editId && (
+          <div style={{background:'rgba(245,166,35,.08)',border:'1px solid rgba(245,166,35,.3)',borderRadius:8,padding:'8px 14px',marginBottom:14,fontSize:12,color:'#92610a',display:'flex',alignItems:'center',gap:8}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Editando dados cadastrais. <strong>Campos financeiros bloqueados</strong> — parcelas e histórico não são afetados.
+          </div>
+        )}
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label">Nome do Devedor <span>*</span></label>
@@ -1126,15 +1139,16 @@ export default function App() {
             {formErrors.product && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.product}</span>}
           </div>
           <div className="form-group">
-            <label className="form-label">Valor Total <span>*</span></label>
-            <div className="input-prefix-wrapper"><span className="input-prefix">R$</span>
-              <input className={`form-control${formErrors.total ? ' input-error' : ''}`} type="number" min="0.01" step="0.01" placeholder="0,00" value={debtForm.total||''} onChange={e=>{setDebtForm(f=>({...f,total:e.target.value}));if(formErrors.total)setFormErrors(fe=>({...fe,total:undefined}));}} />
+            <label className="form-label">Valor Total {!editId && <span>*</span>}</label>
+            <div className="input-prefix-wrapper" style={editId?{opacity:.5,pointerEvents:'none'}:{}}>
+              <span className="input-prefix">R$</span>
+              <input className={`form-control${formErrors.total ? ' input-error' : ''}`} type="number" min="0.01" step="0.01" placeholder="0,00" value={debtForm.total||''} disabled={!!editId} onChange={e=>{setDebtForm(f=>({...f,total:e.target.value}));if(formErrors.total)setFormErrors(fe=>({...fe,total:undefined}));}} />
             </div>
             {formErrors.total && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.total}</span>}
           </div>
-          <div className="form-group">
-            <label className="form-label">Número de Parcelas <span>*</span></label>
-            <input className={`form-control${formErrors.installments ? ' input-error' : ''}`} type="number" min="1" max="360" placeholder="1" value={debtForm.installments||''} onChange={e=>{setDebtForm(f=>({...f,installments:e.target.value}));if(formErrors.installments)setFormErrors(fe=>({...fe,installments:undefined}));}} />
+          <div className="form-group" style={editId?{opacity:.5,pointerEvents:'none'}:{}}>
+            <label className="form-label">Número de Parcelas {!editId && <span>*</span>}</label>
+            <input className={`form-control${formErrors.installments ? ' input-error' : ''}`} type="number" min="1" max="360" placeholder="1" value={debtForm.installments||''} disabled={!!editId} onChange={e=>{setDebtForm(f=>({...f,installments:e.target.value}));if(formErrors.installments)setFormErrors(fe=>({...fe,installments:undefined}));}} />
             {formErrors.installments && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.installments}</span>}
           </div>
           {!editId && (
@@ -1149,22 +1163,24 @@ export default function App() {
               <span className="form-hint">As primeiras N parcelas serão marcadas como pagas automaticamente</span>
             </div>
           )}
-          <div className="form-group">
-            <label className="form-label">Dia de Vencimento <span>*</span></label>
-            <input className={`form-control${formErrors.dueDay ? ' input-error' : ''}`} type="number" min="1" max="28" placeholder="10" value={debtForm.dueDay||''} onChange={e=>{setDebtForm(f=>({...f,dueDay:e.target.value}));if(formErrors.dueDay)setFormErrors(fe=>({...fe,dueDay:undefined}));}} />
+          <div className="form-group" style={editId?{opacity:.5,pointerEvents:'none'}:{}}>
+            <label className="form-label">Dia de Vencimento {!editId && <span>*</span>}</label>
+            <input className={`form-control${formErrors.dueDay ? ' input-error' : ''}`} type="number" min="1" max="28" placeholder="10" value={debtForm.dueDay||''} disabled={!!editId} onChange={e=>{setDebtForm(f=>({...f,dueDay:e.target.value}));if(formErrors.dueDay)setFormErrors(fe=>({...fe,dueDay:undefined}));}} />
             {formErrors.dueDay
               ? <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.dueDay}</span>
               : <span className="form-hint">Entre 1 e 28</span>}
           </div>
-          <div className="form-group">
+          <div className="form-group" style={editId?{opacity:.5,pointerEvents:'none'}:{}}>
             <label className="form-label">Juros por Atraso (%/mês)</label>
-            <input className="form-control" type="number" min="0" max="100" step="0.1" value={debtForm.interestRate??10} onChange={e=>setDebtForm(f=>({...f,interestRate:e.target.value}))} />
+            <input className="form-control" type="number" min="0" max="100" step="0.1" value={debtForm.interestRate??10} disabled={!!editId} onChange={e=>setDebtForm(f=>({...f,interestRate:e.target.value}))} />
           </div>
-          <div className="form-group">
-            <label className="form-label">Data de Início <span>*</span></label>
-            <input className={`form-control${formErrors.startDate ? ' input-error' : ''}`} type="date" value={debtForm.startDate||''} onChange={e=>{setDebtForm(f=>({...f,startDate:e.target.value}));if(formErrors.startDate)setFormErrors(fe=>({...fe,startDate:undefined}));}} />
-            {formErrors.startDate && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.startDate}</span>}
-          </div>
+          {!editId && (
+            <div className="form-group">
+              <label className="form-label">Data de Início</label>
+              <input className="form-control" type="text" value={debtForm.startDate ? `01/${debtForm.startDate.slice(5,7)}/${debtForm.startDate.slice(0,4)}` : ''} readOnly disabled style={{opacity:.7,cursor:'default'}} />
+              <span className="form-hint">Sempre o 1º dia do mês atual — ajuste automático</span>
+            </div>
+          )}
           <div className="form-group full-width">
             <label className="form-label">Observações</label>
             <textarea className="form-control" rows={2} placeholder="Notas adicionais..." value={debtForm.notes||''} onChange={e=>setDebtForm(f=>({...f,notes:e.target.value}))} />
@@ -1186,15 +1202,28 @@ export default function App() {
           {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor Devido',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
             <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value currency">{v}</span></div>
           ))}
-          <div className="form-group" style={{marginTop:16}}>
-            <label className="form-label">Valor Pago</label>
-            <div className="input-prefix-wrapper">
-              <span className="input-prefix">R$</span>
-              <input className="form-control" type="number" step="0.01" min="0.01"
-                value={payInfo.payAmount ?? ''}
-                onChange={e => setPayInfo(p => ({...p, payAmount: e.target.value}))} />
-            </div>
-          </div>
+          {(() => {
+            const _dueVal    = parseFloat(payInfo.inst?.value) || 0;
+            const _payAmt    = parseFloat(payInfo.payAmount)   || 0;
+            const _hasPay    = payInfo.payAmount !== '' && payInfo.payAmount !== undefined;
+            const _pending   = payInfo.debt?.installmentList?.filter((p,j) => j > payInfo.idx && !['paid','partial','skipped'].includes(p.status)) || [];
+            const _isLast    = _pending.length === 0;
+            const _isZero    = _hasPay && _payAmt <= 0;
+            const _blockLast = _isLast && _hasPay && _payAmt > 0 && _payAmt < _dueVal - 0.009;
+            return (
+              <div className="form-group" style={{marginTop:16}}>
+                <label className="form-label">Valor Pago</label>
+                <div className="input-prefix-wrapper">
+                  <span className="input-prefix">R$</span>
+                  <input className={`form-control${(_isZero || _blockLast) ? ' input-error' : ''}`} type="number" step="0.01" min="0.01"
+                    value={payInfo.payAmount ?? ''}
+                    onChange={e => setPayInfo(p => ({...p, payAmount: e.target.value}))} />
+                </div>
+                {_isZero    && <span className="form-hint" style={{color:'var(--color-danger)'}}>Informe um valor maior que zero.</span>}
+                {_blockLast && <span className="form-hint" style={{color:'var(--color-danger)'}}>Última parcela deve ser paga integralmente (R$ {fmt(_dueVal)}).</span>}
+              </div>
+            );
+          })()}
           <div className="form-group">
             <label className="form-label">Data do Pagamento</label>
             <input className="form-control" type="date" value={payInfo.date} onChange={e=>setPayInfo(p=>({...p,date:e.target.value}))} />
@@ -1240,11 +1269,19 @@ export default function App() {
               </>
             : <>
                 <button className="btn btn-ghost" onClick={() => { setPayModal(false); setPayStep('enter'); }} disabled={btnLoading.pay}>Cancelar</button>
-                <button className="btn btn-accent" onClick={handlePaySubmit} disabled={btnLoading.pay} aria-busy={!!btnLoading.pay}>
-                  {btnLoading.pay
-                    ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Processando...</>
-                    : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Confirmar Pagamento</>}
-                </button>
+                {(() => {
+                  const _dv   = parseFloat(payInfo.inst?.value) || 0;
+                  const _pa   = parseFloat(payInfo.payAmount)   || 0;
+                  const _pend = payInfo.debt?.installmentList?.filter((p,j)=>j>payInfo.idx&&!['paid','partial','skipped'].includes(p.status))||[];
+                  const _bad  = _pa <= 0 || (_pend.length === 0 && _pa < _dv - 0.009);
+                  return (
+                    <button className="btn btn-accent" onClick={handlePaySubmit} disabled={btnLoading.pay || _bad} aria-busy={!!btnLoading.pay}>
+                      {btnLoading.pay
+                        ? <><span className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}></span>Processando...</>
+                        : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Confirmar Pagamento</>}
+                    </button>
+                  );
+                })()}
               </>}
         </div>
       </Modal>
