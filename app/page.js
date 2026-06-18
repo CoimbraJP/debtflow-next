@@ -443,7 +443,7 @@ export default function App() {
     debts.forEach(d => {
       d.installmentList?.forEach(i => {
         if (i.status === 'paid' || i.status === 'partial') {
-          if (i.paidDate?.startsWith(thisMonth)) received += (i.paidAmount ?? i.value);
+          if (i.paidDate?.startsWith(thisMonth) && !i.creditPaid) received += (i.paidAmount ?? i.value);
         } else if (i.status === 'skipped') {
           // saldo transferido para próxima parcela, não conta como aberto nem recebido
         } else {
@@ -522,7 +522,7 @@ export default function App() {
     debts.forEach(d => d.installmentList?.forEach(i => {
       if ((i.status === 'paid' || i.status === 'partial') && i.paidDate) {
         const m = months.find(mo => i.paidDate.startsWith(mo.key));
-        if (m) m.value += (i.paidAmount ?? i.value);
+        if (m && !i.creditPaid) m.value += (i.paidAmount ?? i.value);
       }
     }));
     return { months, maxBar: Math.max(...months.map(m => m.value), 1) };
@@ -1272,6 +1272,7 @@ export default function App() {
             (d.installmentList||[]).forEach(inst => {
               if (!['paid','partial'].includes(inst.status)) return;
               if (!inst.paidDate?.startsWith(thisMonth)) return;
+              if (inst.creditPaid) return; // coberto por crédito de outra parcela — não exibir separado
               const paid = inst.paidAmount ?? inst.value;
               const _rate = parseFloat(d.interestRate) || 0;
               let juros = 0;
@@ -1353,24 +1354,18 @@ export default function App() {
                 <div><div className="modal-title">{title}</div>
                   <div className="modal-subtitle">{rows.length} {rows.length===1?'registro':'registros'}</div>
                 </div>
+                {kpiPanel === 'received' && totalJurosMes > 0 && (
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',marginRight:8}}>
+                    <span style={{fontSize:9,fontWeight:700,letterSpacing:'0.06em',color:'#92610a',textTransform:'uppercase',lineHeight:1.2}}>Juros recebidos no mês</span>
+                    <span style={{fontSize:15,fontWeight:700,color:'#b45309',background:'#fffbea',border:'1.5px solid #f5a623',borderRadius:6,padding:'2px 10px',marginTop:2}}>R$ {fmtV(totalJurosMes)}</span>
+                  </div>
+                )}
                 <button className="modal-close" onClick={() => setKpiPanel(null)}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
               <div className="modal-body" style={{overflowY:'auto',flex:1,padding:'12px 20px'}}>
-                {kpiPanel === 'received' && totalJurosMes > 0 && (
-                  <div style={{
-                    background:'#fffbea', border:'1.5px solid #f5a623',
-                    borderRadius:10, padding:'12px 18px', marginBottom:14,
-                    display:'flex', alignItems:'center', gap:10,
-                  }}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f5a623" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    <span style={{fontSize:13.5, color:'#92610a'}}>
-                      Total de juros recebidos no mês:&nbsp;
-                      <strong style={{fontSize:15, color:'#b45309'}}>R$ {fmtV(totalJurosMes)}</strong>
-                    </span>
-                  </div>
-                )}
+
                 {rows.length === 0
                   ? <div style={{textAlign:'center',padding:32,color:'var(--text-muted)',fontSize:14}}>Nenhum registro encontrado.</div>
                   : (
@@ -1560,7 +1555,7 @@ function ActivityList({ items }) {
 function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWhatsApp }) {
   const paid     = debt.installmentList?.filter(i=>['paid','partial','skipped'].includes(i.status)).length||0;
   const total    = debt.installmentList?.length||0;
-  const paidAmt  = debt.installmentList?.filter(i=>i.status==='paid'||i.status==='partial').reduce((s,i)=>s+(i.paidAmount??i.value),0)||0;
+  const paidAmt  = debt.installmentList?.filter(i=>(i.status==='paid'||i.status==='partial')&&!i.creditPaid).reduce((s,i)=>s+(i.paidAmount??i.value),0)||0;
   const openAmt  = debt.installmentList?.filter(i=>!['paid','partial','skipped'].includes(i.status)).reduce((s,i)=>s+i.value,0)||0;
   const progress = total>0?(paid/total*100):0;
 
