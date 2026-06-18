@@ -1726,4 +1726,30 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                     );
                   })()}
                   {isSkipped && (() => {
-                    const juros = parseFloat((inst.val
+                    const juros = parseFloat((inst.value * (debt.interestRate||0) / 100).toFixed(2));
+                    return (
+                      <div style={{fontSize:11,color:'var(--color-danger)'}}>
+                        R$ {fmt(inst.value)} transferido <span style={{color:'#f5a623'}}>({`+ juros R$ ${fmt(juros)}`})</span> para próxima
+                      </div>
+                    );
+                  })()}
+                  {!isDone && (
+                    <div style={{fontSize:11,color:'var(--text-muted)'}}>Vence: {fmtD(inst.dueDate)} · R$ {fmt(inst.value)}</div>
+                  )}
+                </div>
+                {!isDone && (
+                  <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
+                    <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
+                      onClick={() => onPay(debt, inst, idx)}>Pagar</button>
+                    <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
+                      onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
