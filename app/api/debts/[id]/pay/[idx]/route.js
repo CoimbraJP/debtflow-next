@@ -19,29 +19,28 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: 'Parcela não encontrada' }, { status: 404 });
   }
 
-  const inst       = debt.installmentList[i];
-  const dueValue   = parseFloat(inst.value) || 0;
-  const payAmount  = body.payAmount && body.payAmount > 0 ? parseFloat(body.payAmount) : dueValue;
-  const isPartial  = payAmount < dueValue - 0.009; // tolerância de 1 centavo
+  const inst      = debt.installmentList[i];
+  const dueValue  = parseFloat(inst.value) || 0;
+  const payAmount = body.payAmount && body.payAmount > 0 ? parseFloat(body.payAmount) : dueValue;
+  const isPartial = payAmount < dueValue - 0.009; // pagamento menor que o devido
+  const isOver    = payAmount > dueValue + 0.009; // pagamento MAIOR que o devido
 
   inst.status     = isPartial ? 'partial' : 'paid';
   inst.paidDate   = payDate;
   inst.paidAmount = payAmount;
 
-  // Pagamento parcial: saldo restante + juros transferidos para a próxima parcela
-  // Fórmula: saldo = (valorDevido - valorPago); carry = saldo * (1 + taxa/100)
-  // Apenas o juro (saldo * taxa/100) é rastreado em carriedInterest na próxima parcela
   if (isPartial) {
-    const remainder      = dueValue - payAmount;
-    const interestRate   = parseFloat(debt.interestRate) || 0;
-    const interestPart   = parseFloat((remainder * interestRate / 100).toFixed(2));
-    const carry          = parseFloat((remainder + interestPart).toFixed(2));
+    // ── UNDERPAYMENT: saldo restante + juros transferido para a próxima parcela ──
+    // Fórmula: carry = (valorDevido - valorPago) * (1 + taxa/100)
+    const remainder            = parseFloat((dueValue - payAmount).toFixed(2));
+    const interestRate         = parseFloat(debt.interestRate) || 0;
+    const interestPart         = parseFloat((remainder * interestRate / 100).toFixed(2));
+    const carry                = parseFloat((remainder + interestPart).toFixed(2));
 
-    inst.dueSent        = true;
-    inst.overdueSent    = true;
-    inst.penaltyApplied = true;
+    inst.dueSent               = true;
+    inst.overdueSent           = true;
+    inst.penaltyApplied        = true;
 
-    // Carrega TODOS os juros acumulados (novos + anteriores) para a próxima parcela
     const totalInterestToCarry = parseFloat((interestPart + (inst.carriedInterest || 0)).toFixed(2));
 
     const nextInst = debt.installmentList.find((p, j) => j > i && !['paid', 'partial', 'skipped'].includes(p.status));
@@ -50,9 +49,38 @@ export async function POST(request, { params }) {
       nextInst.isPenalty       = true;
       nextInst.carriedInterest = parseFloat(((nextInst.carriedInterest || 0) + totalInterestToCarry).toFixed(2));
     }
+
+  } else if (isOver) {
+    // ── OVERPAYMENT (Fix 1+2): crédito propagado para parcelas seguintes SEM juros ──
+    // Ex: parcela = R$500, pagou R$800 → crédito R$300 aplicado na próxima parcela
+    // Ex: parcela = R$500, pagou R$2500 → cobre 2 parcelas inteiras + desconta R$500 da 3ª
+    let credit = parseFloat((payAmount - dueValue).toFixed(2));
+    const creditOriginal = credit;
+
+    for (let j = i + 1; j < debt.installmentList.length && credit > 0.009; j++) {
+      const next = debt.installmentList[j];
+      if (['paid', 'partial', 'skipped'].includes(next.status)) continue;
+
+      const nextVal = parseFloat(next.value) || 0;
+
+      if (credit >= nextVal - 0.009) {
+        // Crédito cobre esta parcela inteira — quita ela
+        next.status         = 'paid';
+        next.paidDate       = payDate;
+        next.paidAmount     = nextVal;
+        next.dueSent        = true;
+        next.overdueSent    = true;
+        next.penaltyApplied = true;
+        credit = parseFloat((credit - nextVal).toFixed(2));
+      } else {
+        // Crédito parcial — apenas reduz o valor desta parcela (sem juros, é pagamento adiantado)
+        next.value = parseFloat((nextVal - credit).toFixed(2));
+        credit = 0;
+      }
+    }
   }
 
-  // Dívida quitada se todas as parcelas estiverem em estado final
+  // ── Checar se a dívida toda foi quitada ───────────────────────────────
   const allSettled = debt.installmentList.every(p => ['paid', 'partial', 'skipped'].includes(p.status));
   if (allSettled) {
     debt.status = 'paid';
@@ -62,14 +90,21 @@ export async function POST(request, { params }) {
       type: 'success',
     });
   } else {
-    const hasOverdue   = debt.installmentList.some(p => p.status === 'overdue' || p.status === 'skipped');
-    debt.status        = hasOverdue ? 'overdue' : 'pending';
-    const remainder    = dueValue - payAmount;
-    const interestRate = parseFloat(debt.interestRate) || 0;
-    const carry        = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));
-    const desc = isPartial
-      ? `💰 Pagamento parcial: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} · Pago: R$ ${payAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · Saldo transferido (c/ juros): R$ ${carry.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-      : `💰 Pagamento registrado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (R$ ${dueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+    const hasOverdue = debt.installmentList.some(p => p.status === 'overdue' || p.status === 'skipped');
+    debt.status      = hasOverdue ? 'overdue' : 'pending';
+
+    let desc;
+    if (isOver) {
+      const creditOriginal = parseFloat((payAmount - dueValue).toFixed(2));
+      desc = `💰 Pagamento antecipado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} · Pago: R$ ${payAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · Crédito de R$ ${creditOriginal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} aplicado nas próximas parcelas`;
+    } else if (isPartial) {
+      const remainder    = parseFloat((dueValue - payAmount).toFixed(2));
+      const interestRate = parseFloat(debt.interestRate) || 0;
+      const carry        = parseFloat((remainder * (1 + interestRate / 100)).toFixed(2));
+      desc = `💰 Pagamento parcial: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} · Pago: R$ ${payAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · Saldo transferido (c/ juros): R$ ${carry.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+    } else {
+      desc = `💰 Pagamento registrado: <strong>${debt.name}</strong> — Parcela ${inst.number}/${debt.installments} (R$ ${dueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+    }
     await Activity.create({ tenant, text: desc, type: 'success' });
   }
 

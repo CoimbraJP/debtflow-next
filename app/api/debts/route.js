@@ -8,9 +8,21 @@ function generateInstallments(debt, paidCount = 0) {
   const instValue = parseFloat((debt.total / debt.installments).toFixed(2));
   const startDate = new Date(debt.createdAt + 'T00:00:00Z');
 
+  // Fix 4 — Smart date: se o dueDay já passou neste mês, a primeira parcela vai pro mês seguinte
+  // Ex: cadastro dia 18, vencimento dia 17 → 1ª parcela em 17 do mês seguinte
+  const firstDue = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), debt.dueDay));
+  // Tratar overflow de mês (ex: dueDay=31 em fevereiro → setUTCDate(0) volta pro último dia do mês anterior; por isso verificamos)
+  if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0);
+  // Se o primeiro vencimento é ANTES da data de cadastro, avança um mês
+  if (firstDue < startDate) {
+    firstDue.setUTCMonth(firstDue.getUTCMonth() + 1);
+    firstDue.setUTCDate(debt.dueDay);
+    if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0);
+  }
+
   for (let i = 0; i < debt.installments; i++) {
-    const dueDate = new Date(startDate);
-    dueDate.setUTCMonth(startDate.getUTCMonth() + i);
+    const dueDate = new Date(firstDue);
+    dueDate.setUTCMonth(firstDue.getUTCMonth() + i);
     dueDate.setUTCDate(debt.dueDay);
     if (dueDate.getUTCDate() !== debt.dueDay) dueDate.setUTCDate(0);
 

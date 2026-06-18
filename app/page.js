@@ -113,6 +113,7 @@ export default function App() {
   // Modal: confirmação genérica
   const [gcModal,    setGcModal]    = useState(false);
   const [gcData,     setGcData]     = useState({ title:'', msg:'', label:'', style:'danger', fn:null });
+  const [celebModal, setCelebModal] = useState(null); // Fix 3 — nome do cliente ao quitar tudo
 
   // Settings form local
   const [settForm,   setSettForm]   = useState(DEFAULT_SETTINGS);
@@ -286,6 +287,10 @@ export default function App() {
         // Atualiza side panel se estiver aberto
         if (sideDebt?.id === debt.id) setSideDebt(updated);
         fetchAll();
+        // Fix 3 — Parabéns quando o cliente quita todas as parcelas
+        if (updated.status === 'paid') {
+          setTimeout(() => setCelebModal(debt.name), 600);
+        }
       }
     } finally {
       setBtnLoading(b => ({...b, pay: false}));
@@ -1430,6 +1435,24 @@ export default function App() {
         </div>
       </Modal>
 
+      {/* ── MODAL: Parabéns — Cliente Finalizado (Fix 3) ──────────── */}
+      <Modal open={!!celebModal} onClose={() => setCelebModal(null)} title="🎉 Cliente Finalizado!" maxWidth={380}>
+        <div style={{ textAlign:'center', padding:'8px 0 20px' }}>
+          <div style={{ fontSize:52, marginBottom:12, lineHeight:1 }}>🎉</div>
+          <p style={{ color:'var(--text-primary)', fontSize:15, fontWeight:600, marginBottom:6 }}>
+            Parabéns! <strong>{celebModal}</strong> quitou todas as parcelas!
+          </p>
+          <p style={{ color:'var(--text-secondary)', fontSize:13 }}>
+            Todas as parcelas foram pagas com sucesso.
+          </p>
+        </div>
+        <div className="modal-footer" style={{ justifyContent:'center' }}>
+          <button className="btn btn-accent" onClick={() => setCelebModal(null)} style={{ minWidth:150 }}>
+            🎉 Perfeito!
+          </button>
+        </div>
+      </Modal>
+
       {/* ── TOASTS ───────────────────────────────────────────────── */}
       <div className="toast-container">
         {toasts.map(t => (
@@ -1703,30 +1726,4 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                     );
                   })()}
                   {isSkipped && (() => {
-                    const juros = parseFloat((inst.value * (debt.interestRate||0) / 100).toFixed(2));
-                    return (
-                      <div style={{fontSize:11,color:'var(--color-danger)'}}>
-                        R$ {fmt(inst.value)} transferido <span style={{color:'#f5a623'}}>({`+ juros R$ ${fmt(juros)}`})</span> para próxima
-                      </div>
-                    );
-                  })()}
-                  {!isDone && (
-                    <div style={{fontSize:11,color:'var(--text-muted)'}}>Vence: {fmtD(inst.dueDate)} · R$ {fmt(inst.value)}</div>
-                  )}
-                </div>
-                {!isDone && (
-                  <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
-                    <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
-                      onClick={() => onPay(debt, inst, idx)}>Pagar</button>
-                    <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
-                      onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </>
-  );
-}
+                    const juros = parseFloat((inst.val
