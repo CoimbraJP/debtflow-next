@@ -766,6 +766,70 @@ export default function App() {
 
               <div className="dashboard-grid" style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:24 }}>
                 <div>
+                  {/* ══ COBRAR HOJE ══════════════════════════════════════════ */}
+                  {(() => {
+                    const cobrarHoje = sortedDebts.filter(d => {
+                      const fp = d.installmentList?.find(p => !['paid','partial','skipped'].includes(p.status));
+                      return fp?.dueDate === today;
+                    });
+                    if (cobrarHoje.length === 0) return null;
+                    return (
+                      <div style={{marginBottom:20}}>
+                        <div className="section-header" style={{marginBottom:10}}>
+                          <div>
+                            <div className="section-title" style={{color:'var(--color-danger)',display:'flex',alignItems:'center',gap:8}}>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                              COBRAR HOJE
+                            </div>
+                            <div className="section-subtitle">{cobrarHoje.length} devedor{cobrarHoje.length>1?'es':''} com vencimento hoje</div>
+                          </div>
+                        </div>
+                        <div className="table-container desktop-only" style={{padding:0,overflow:'hidden'}}>
+                          <table className="data-table"><tbody>
+                            {cobrarHoje.map(d => {
+                              const fp = d.installmentList?.find(p => !['paid','partial','skipped'].includes(p.status));
+                              const fpIdx = d.installmentList?.indexOf(fp);
+                              return (
+                                <tr key={d.id} className="row-today" onClick={()=>setSideDebt(d)} style={{cursor:'pointer'}}>
+                                  <td><div className="table-name"><div className="table-avatar" style={{background:avatarColor(d.name)}}>{d.name[0]?.toUpperCase()}</div><div style={{fontWeight:700,color:'var(--color-danger)'}}>{d.name}<div style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>{d.phone}</div></div></div></td>
+                                  <td>{d.product}</td>
+                                  <td className="currency" style={{color:'var(--color-danger)',fontWeight:700}}>R$ {fmt(fp?.value)}</td>
+                                  <td>Parcela {fp?.number}/{d.installments}</td>
+                                  <td onClick={e=>e.stopPropagation()} style={{display:'flex',gap:6,padding:'10px 12px'}}>
+                                    {d.phone && fp && <button className="btn btn-sm" style={{background:'#25D366',color:'#fff',border:'none'}} onClick={()=>sendWhatsApp(d,fp)}>Cobrar</button>}
+                                    <button className="btn btn-accent btn-sm" onClick={()=>openPayModal(d,fp,fpIdx)}>Pagar</button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody></table>
+                        </div>
+                        <div className="mobile-only" style={{display:'flex',flexDirection:'column',gap:8}}>
+                          {cobrarHoje.map(d => {
+                            const fp = d.installmentList?.find(p => !['paid','partial','skipped'].includes(p.status));
+                            const fpIdx = d.installmentList?.indexOf(fp);
+                            return (
+                              <div key={d.id} className="debt-mobile-card today" onClick={()=>setSideDebt(d)} style={{cursor:'pointer'}}>
+                                <div className="debt-mobile-card-top">
+                                  <div className="table-avatar" style={{background:avatarColor(d.name),width:44,height:44,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,fontWeight:800,color:'#fff',flexShrink:0}}>{d.name[0]?.toUpperCase()}</div>
+                                  <div className="debt-mobile-card-info">
+                                    <div className="debt-mobile-card-name" style={{color:'var(--color-danger)'}}>{d.name}</div>
+                                    <div className="debt-mobile-card-sub">{d.product} — Parcela {fp?.number}/{d.installments} — R$ {fmt(fp?.value)}</div>
+                                  </div>
+                                  <span style={{background:'var(--color-danger)',color:'#fff',borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:700,flexShrink:0}}>HOJE</span>
+                                </div>
+                                <div className="debt-mobile-card-actions" onClick={e=>e.stopPropagation()}>
+                                  {d.phone && fp && <button className="card-action-btn card-action-cobrar" onClick={()=>sendWhatsApp(d,fp)}>Cobrar</button>}
+                                  <button className="card-action-btn" style={{background:'var(--color-accent)',color:'#fff',border:'none'}} onClick={()=>openPayModal(d,fp,fpIdx)}>Pagar</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="section-header">
                     <div><div className="section-title">Dívidas Recentes</div><div className="section-subtitle">Últimas movimentações</div></div>
                     <div style={{display:'flex',gap:6,alignItems:'center'}}>
@@ -782,9 +846,8 @@ export default function App() {
                           <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>Nenhuma dívida cadastrada</td></tr>
                         ) : sortedDebts.slice(0, 6).map(d => {
                           const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
-                          const _dToday = next?.dueDate === today;
                           return (
-                            <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':_dToday?'row-today':''}>
+                            <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':''}>
                               <td><div className="table-name"><div className="table-avatar" style={{ background: avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{d.phone}</div>}</div></div></td>
                               <td>{d.product}</td>
                               <td className="currency"><strong>R$ {fmt(d.total)}</strong></td>
@@ -848,7 +911,6 @@ export default function App() {
                       const diff = nextInst ? daysDiff(today, nextInst.dueDate) : null;
                       let cardCls = 'debt-mobile-card';
                       if (diff !== null && diff < 0)       cardCls += ' overdue';
-                      else if (diff !== null && diff === 0) cardCls += ' today';
                       else if (diff !== null && diff <= 5)  cardCls += ' warning';
                       return (
                         <div key={d.id} className={cardCls} onClick={() => setSideDebt(d)}>
@@ -903,10 +965,8 @@ export default function App() {
                       {filteredDebts.map(d => {
                         const paid = d.installmentList?.filter(i => i.status==='paid').length || 0;
                         const total = d.installmentList?.length || 0;
-                        const _nextD = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
-                        const _isToday = _nextD?.dueDate === today;
                         return (
-                          <tr key={d.id} className={d.status==='overdue'?'row-overdue':_isToday?'row-today':''} onClick={() => setSideDebt(d)}>
+                          <tr key={d.id} className={d.status==='overdue'?'row-overdue':''} onClick={() => setSideDebt(d)}>
                             <td><div className="table-name"><div className="table-avatar" style={{ background:avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone&&<div style={{fontSize:11,color:'var(--text-muted)'}}>{d.phone}</div>}</div></div></td>
                             <td>{d.product}</td>
                             <td className="currency"><strong>R$ {fmt(d.total)}</strong></td>
@@ -1339,7 +1399,10 @@ export default function App() {
                 // Juros ainda não recebidos — ficam pendentes na próxima parcela (carry)
                 juros = 0;
               } else if (inst.status === 'paid') {
-                if (inst.penaltyApplied && inst.penaltyRate > 0) {
+                if ((inst.lateInterestPaid || 0) > 0) {
+                  // Juros de atraso pagos no ato (pagamento após vencimento c/ taxa)
+                  juros = inst.lateInterestPaid;
+                } else if (inst.penaltyApplied && inst.penaltyRate > 0) {
                   // Multa do scheduler (5+ dias de atraso)
                   juros = Math.max(0, (inst.value||0) - (inst.originalValue||0));
                 } else if (inst.isPenalty) {
