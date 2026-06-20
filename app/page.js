@@ -262,15 +262,12 @@ export default function App() {
   // ── Pagamentos ─────────────────────────────────────────────────────────
   function openPayModal(debt, inst, idx) {
     setPayStep('enter');
-    const _rate = parseFloat(debt?.interestRate) || 0;
-    const _isOverdue = today > (inst?.dueDate || '') && inst?.status === 'pending';
-    const _baseOverdue = _isOverdue
-      ? parseFloat((parseFloat(inst.value) * (1 + _rate / 100)).toFixed(2))
-      : parseFloat(inst?.value ?? 0);
-    // Adiciona juros manuais ao valor pré-preenchido
-    const _manualJuros = parseFloat(inst?.manualInterest || 0);
-    const _payPrefill  = parseFloat((_baseOverdue + _manualJuros).toFixed(2));
-    setPayInfo({ debt, inst, idx, date: today, payAmount: _payPrefill || (inst?.value ?? '') });
+    const _rate      = parseFloat(debt?.interestRate) || 0;
+    const _isOvd     = today > (inst?.dueDate || '') && inst?.status === 'pending';
+    const _base      = parseFloat(inst?.value ?? 0);
+    const _autoJuros = _isOvd ? parseFloat((_base * _rate / 100).toFixed(2)) : 0;
+    const _total     = parseFloat((_base + _autoJuros).toFixed(2));
+    setPayInfo({ debt, inst, idx, date: today, payAmount: _total || _base, baseValue: _base, juros: _autoJuros, showJurosEdit: false });
     setPayModal(true);
   }
   function handlePaySubmit() {
@@ -1273,9 +1270,63 @@ export default function App() {
       {/* ── MODAL: Pagamento ─────────────────────────────────────── */}
       <Modal open={payModal} onClose={() => { setPayModal(false); setPayStep('enter'); }} title={payStep==='preview' ? 'Confirmar Pagamento Parcial' : 'Registrar Pagamento'} subtitle={payStep==='preview' ? 'Revise os valores antes de confirmar' : 'Confirme o pagamento da parcela'} maxWidth={420}>
         {payInfo.inst && payStep === 'enter' && <>
-          {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor Devido',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
+          {[['Devedor',payInfo.debt?.name],['Parcela',`${payInfo.inst.number}/${payInfo.debt?.installments}${payInfo.inst.isPenalty?' (c/ juros)':''}`],['Valor Base',`R$ ${fmt(payInfo.inst.value)}`],['Vencimento',fmtDate(payInfo.inst.dueDate)]].map(([l,v]) => (
             <div className="stat-row" key={l}><span className="stat-row-label">{l}</span><span className="stat-row-value currency">{v}</span></div>
           ))}
+          {/* ── Juros personalizados ─────────────────────────────────────── */}
+          {(() => {
+            const _base  = parseFloat(payInfo.baseValue) || parseFloat(payInfo.inst?.value) || 0;
+            const _juros = parseFloat(payInfo.juros ?? 0);
+            const _rate  = parseFloat(payInfo.debt?.interestRate) || 0;
+            const _autoJ = parseFloat((_base * _rate / 100).toFixed(2));
+            return (
+              <div style={{marginTop:8,marginBottom:4}}>
+                {!payInfo.showJurosEdit ? (
+                  <button type="button"
+                    style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 14px',
+                      background:_juros>0?'rgba(245,166,35,.1)':'var(--bg-elevated)',
+                      border:`1px solid ${_juros>0?'rgba(245,166,35,.45)':'var(--border-default)'}`,
+                      borderRadius:10,cursor:'pointer',textAlign:'left',transition:'all .15s'}}
+                    onClick={()=>setPayInfo(p=>({...p,showJurosEdit:true}))}>
+                    <span style={{fontSize:15}}>💰</span>
+                    <span style={{flex:1,fontSize:13,fontWeight:_juros>0?600:400,color:_juros>0?'#b8730a':'var(--text-muted)'}}>
+                      {_juros>0 ? `Juros: R$ ${Number(_juros).toLocaleString('pt-BR',{minimumFractionDigits:2})}` : 'Personalizar juros'}
+                    </span>
+                    <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>✏️ editar</span>
+                  </button>
+                ) : (
+                  <div style={{padding:'12px 14px',background:'rgba(245,166,35,.07)',border:'1px solid rgba(245,166,35,.4)',borderRadius:10}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',marginBottom:8,textTransform:'uppercase',letterSpacing:.5}}>Juros (R$)</div>
+                    <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                      <div className="input-prefix-wrapper" style={{flex:1}}>
+                        <span className="input-prefix">R$</span>
+                        <input className="form-control" type="number" min="0" step="0.01" autoFocus
+                          value={payInfo.juros ?? 0}
+                          onChange={e=>{
+                            const j=Math.max(0,parseFloat(e.target.value)||0);
+                            setPayInfo(p=>({...p,juros:j,payAmount:parseFloat((_base+j).toFixed(2))}));
+                          }}
+                        />
+                      </div>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{fontSize:11,whiteSpace:'nowrap',padding:'6px 10px'}}
+                        onClick={()=>setPayInfo(p=>({...p,juros:0,payAmount:_base,showJurosEdit:false}))}>
+                        Sem juros
+                      </button>
+                      <button type="button" className="btn btn-primary btn-sm" style={{fontSize:11,padding:'6px 12px'}}
+                        onClick={()=>setPayInfo(p=>({...p,showJurosEdit:false}))}>
+                        ✓
+                      </button>
+                    </div>
+                    {_rate>0 && _autoJ>0 && (
+                      <div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>
+                        Sugerido ({_rate}% a.m.): R$ {Number(_autoJ).toLocaleString('pt-BR',{minimumFractionDigits:2})}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {(() => {
             const _dueVal    = parseFloat(payInfo.inst?.value) || 0;
             const _payAmt    = parseFloat(payInfo.payAmount)   || 0;
@@ -1699,23 +1750,6 @@ function ActivityList({ items }) {
 }
 
 function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWhatsApp }) {
-  // Estado local para juros manuais (indexado por idx da parcela)
-  const [manualInputs, setManualInputs] = useState({});
-  const [savingManual, setSavingManual] = useState({});
-
-  async function saveManualInterest(idx, value) {
-    const v = parseFloat(value) || 0;
-    setSavingManual(s => ({...s, [idx]: true}));
-    try {
-      await fetch(`/api/debts/${debt.id}/installments/${idx}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-tenant': debt.tenant || 'default' },
-        body: JSON.stringify({ manualInterest: v }),
-      });
-    } finally {
-      setSavingManual(s => ({...s, [idx]: false}));
-    }
-  }
 
   const paid     = debt.installmentList?.filter(i=>['paid','partial','skipped'].includes(i.status)).length||0;
   const total    = debt.installmentList?.length||0;
@@ -1917,38 +1951,17 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                   })()}
                 </div>
                 {!isDone && (() => {
-                  const _manVal = manualInputs[idx] !== undefined ? manualInputs[idx] : (inst.manualInterest || 0);
-                  const _hasMan = parseFloat(_manVal) > 0;
-                  const _isOvdA = today > inst.dueDate;
-                  const _rateA  = parseFloat(debt.interestRate) || 0;
-                  const _baseVA = _isOvdA ? parseFloat((inst.value*(1+_rateA/100)).toFixed(2)) : inst.value;
-                  const _totalA = parseFloat((_baseVA + (parseFloat(_manVal)||0)).toFixed(2));
-                  const _isLastI= !debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status));
+                  const _isLastI = !debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status));
                   return (
-                    <div style={{display:'flex',flexDirection:'column',gap:5,width:'100%',marginTop:5}}>
-                      {/* Juros Manuais */}
-                      <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 8px',background:'rgba(245,166,35,.06)',borderRadius:6,border:'1px dashed rgba(245,166,35,.35)'}}>
-                        <span style={{fontSize:10,fontWeight:700,color:'#92610a',letterSpacing:.3,whiteSpace:'nowrap'}}>+ JUROS R$</span>
-                        <input type="number" min="0" step="0.01" placeholder="0,00"
-                          value={_manVal}
-                          onChange={e => setManualInputs(s=>({...s,[idx]:e.target.value}))}
-                          onBlur={e => saveManualInterest(idx, e.target.value)}
-                          style={{width:68,padding:'2px 5px',fontSize:12,fontWeight:600,border:'1px solid rgba(245,166,35,.4)',borderRadius:4,background:'var(--bg-surface)',color:'var(--text-primary)',textAlign:'right'}}
-                        />
-                        {savingManual[idx] && <span style={{fontSize:9,color:'var(--text-muted)'}}>⟳</span>}
-                        {_hasMan && <span style={{fontSize:11,color:'#92610a',marginLeft:'auto',whiteSpace:'nowrap'}}>Total: <strong>R$ {fmt(_totalA)}</strong></span>}
-                      </div>
-                      {/* Botões */}
-                      <div style={{display:'flex',gap:4}}>
-                        <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset',flex:1}}
-                          onClick={() => onPay(debt, {...inst, manualInterest: parseFloat(_manVal)||0}, idx)}>
-                          {_hasMan ? `Pagar R$ ${fmt(_totalA)}` : 'Pagar'}
-                        </button>
-                        {!_isLastI && (
-                          <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
-                            onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
-                        )}
-                      </div>
+                    <div style={{display:'flex',gap:4,marginTop:8}}>
+                      <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset',flex:1}}
+                        onClick={() => onPay(debt, inst, idx)}>
+                        Pagar
+                      </button>
+                      {!_isLastI && (
+                        <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
+                          onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
+                      )}
                     </div>
                   );
                 })()}
