@@ -264,10 +264,13 @@ export default function App() {
     setPayStep('enter');
     const _rate = parseFloat(debt?.interestRate) || 0;
     const _isOverdue = today > (inst?.dueDate || '') && inst?.status === 'pending';
-    const _payPrefill = _isOverdue
+    const _baseOverdue = _isOverdue
       ? parseFloat((parseFloat(inst.value) * (1 + _rate / 100)).toFixed(2))
-      : (inst?.value ?? '');
-    setPayInfo({ debt, inst, idx, date: today, payAmount: _payPrefill });
+      : parseFloat(inst?.value ?? 0);
+    // Adiciona juros manuais ao valor pré-preenchido
+    const _manualJuros = parseFloat(inst?.manualInterest || 0);
+    const _payPrefill  = parseFloat((_baseOverdue + _manualJuros).toFixed(2));
+    setPayInfo({ debt, inst, idx, date: today, payAmount: _payPrefill || (inst?.value ?? '') });
     setPayModal(true);
   }
   function handlePaySubmit() {
@@ -1696,6 +1699,24 @@ function ActivityList({ items }) {
 }
 
 function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWhatsApp }) {
+  // Estado local para juros manuais (indexado por idx da parcela)
+  const [manualInputs, setManualInputs] = React.useState({});
+  const [savingManual, setSavingManual] = React.useState({});
+
+  async function saveManualInterest(idx, value) {
+    const v = parseFloat(value) || 0;
+    setSavingManual(s => ({...s, [idx]: true}));
+    try {
+      await fetch(`/api/debts/${debt.id}/installments/${idx}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-tenant': debt.tenant || 'default' },
+        body: JSON.stringify({ manualInterest: v }),
+      });
+    } finally {
+      setSavingManual(s => ({...s, [idx]: false}));
+    }
+  }
+
   const paid     = debt.installmentList?.filter(i=>['paid','partial','skipped'].includes(i.status)).length||0;
   const total    = debt.installmentList?.length||0;
   const paidAmt  = debt.installmentList?.filter(i=>(i.status==='paid'||i.status==='partial')&&!i.creditPaid).reduce((s,i)=>s+(i.paidAmount??i.value),0)||0;
@@ -1895,16 +1916,42 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                     );
                   })()}
                 </div>
-                {!isDone && (
-                  <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
-                    <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
-                      onClick={() => onPay(debt, inst, idx)}>Pagar</button>
-                    {!debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status)) ? null : (
-                      <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 10px',minHeight:'unset',minWidth:52}}
-                        onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
-                    )}
-                  </div>
-                )}
+                {!isDone && (() => {
+                  const _manVal = manualInputs[idx] !== undefined ? manualInputs[idx] : (inst.manualInterest || 0);
+                  const _hasMan = parseFloat(_manVal) > 0;
+                  const _isOvdA = today > inst.dueDate;
+                  const _rateA  = parseFloat(debt.interestRate) || 0;
+                  const _baseVA = _isOvdA ? parseFloat((inst.value*(1+_rateA/100)).toFixed(2)) : inst.value;
+                  const _totalA = parseFloat((_baseVA + (parseFloat(_manVal)||0)).toFixed(2));
+                  const _isLastI= !debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status));
+                  return (
+                    <div style={{display:'flex',flexDirection:'column',gap:5,width:'100%',marginTop:5}}>
+                      {/* Juros Manuais */}
+                      <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 8px',background:'rgba(245,166,35,.06)',borderRadius:6,border:'1px dashed rgba(245,166,35,.35)'}}>
+                        <span style={{fontSize:10,fontWeight:700,color:'#92610a',letterSpacing:.3,whiteSpace:'nowrap'}}>+ JUROS R$</span>
+                        <input type="number" min="0" step="0.01" placeholder="0,00"
+                          value={_manVal}
+                          onChange={e => setManualInputs(s=>({...s,[idx]:e.target.value}))}
+                          onBlur={e => saveManualInterest(idx, e.target.value)}
+                          style={{width:68,padding:'2px 5px',fontSize:12,fontWeight:600,border:'1px solid rgba(245,166,35,.4)',borderRadius:4,background:'var(--bg-surface)',color:'var(--text-primary)',textAlign:'right'}}
+                        />
+                        {savingManual[idx] && <span style={{fontSize:9,color:'var(--text-muted)'}}>⟳</span>}
+                        {_hasMan && <span style={{fontSize:11,color:'#92610a',marginLeft:'auto',whiteSpace:'nowrap'}}>Total: <strong>R$ {fmt(_totalA)}</strong></span>}
+                      </div>
+                      {/* Botões */}
+                      <div style={{display:'flex',gap:4}}>
+                        <button className="btn btn-success btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset',flex:1}}
+                          onClick={() => onPay(debt, {...inst, manualInterest: parseFloat(_manVal)||0}, idx)}>
+                          {_hasMan ? `Pagar R$ ${fmt(_totalA)}` : 'Pagar'}
+                        </button>
+                        {!_isLastI && (
+                          <button className="btn btn-danger btn-sm" style={{fontSize:11,padding:'4px 8px',minHeight:'unset'}}
+                            onClick={() => onSkip(debt, inst, idx)}>Não Pagou</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
