@@ -1301,7 +1301,7 @@ export default function App() {
                       <div className="input-prefix-wrapper" style={{flex:1}}>
                         <span className="input-prefix">R$</span>
                         <input className="form-control" type="number" min="0" step="0.01" autoFocus
-                          value={payInfo.juros ?? 0}
+                          value={payInfo.juros || ''}
                           onChange={e=>{
                             const j=Math.max(0,parseFloat(e.target.value)||0);
                             setPayInfo(p=>({...p,juros:j,payAmount:parseFloat((_base+j).toFixed(2))}));
