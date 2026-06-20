@@ -262,7 +262,12 @@ export default function App() {
   // ── Pagamentos ─────────────────────────────────────────────────────────
   function openPayModal(debt, inst, idx) {
     setPayStep('enter');
-    setPayInfo({ debt, inst, idx, date: today, payAmount: inst?.value ?? '' });
+    const _rate = parseFloat(debt?.interestRate) || 0;
+    const _isOverdue = today > (inst?.dueDate || '') && inst?.status === 'pending';
+    const _payPrefill = _isOverdue
+      ? parseFloat((parseFloat(inst.value) * (1 + _rate / 100)).toFixed(2))
+      : (inst?.value ?? '');
+    setPayInfo({ debt, inst, idx, date: today, payAmount: _payPrefill });
     setPayModal(true);
   }
   function handlePaySubmit() {
@@ -777,8 +782,9 @@ export default function App() {
                           <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>Nenhuma dívida cadastrada</td></tr>
                         ) : sortedDebts.slice(0, 6).map(d => {
                           const next = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
+                          const _dToday = next?.dueDate === today;
                           return (
-                            <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':''}>
+                            <tr key={d.id} onClick={() => setSideDebt(d)} className={d.status==='overdue'?'row-overdue':_dToday?'row-today':''}>
                               <td><div className="table-name"><div className="table-avatar" style={{ background: avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{d.phone}</div>}</div></div></td>
                               <td>{d.product}</td>
                               <td className="currency"><strong>R$ {fmt(d.total)}</strong></td>
@@ -841,8 +847,9 @@ export default function App() {
                       const nextInst = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
                       const diff = nextInst ? daysDiff(today, nextInst.dueDate) : null;
                       let cardCls = 'debt-mobile-card';
-                      if (diff !== null && diff < 0) cardCls += ' overdue';
-                      else if (diff !== null && diff <= 5) cardCls += ' warning';
+                      if (diff !== null && diff < 0)       cardCls += ' overdue';
+                      else if (diff !== null && diff === 0) cardCls += ' today';
+                      else if (diff !== null && diff <= 5)  cardCls += ' warning';
                       return (
                         <div key={d.id} className={cardCls} onClick={() => setSideDebt(d)}>
                           <div className="debt-mobile-card-top">
@@ -896,8 +903,10 @@ export default function App() {
                       {filteredDebts.map(d => {
                         const paid = d.installmentList?.filter(i => i.status==='paid').length || 0;
                         const total = d.installmentList?.length || 0;
+                        const _nextD = d.installmentList?.find(i => !['paid','partial','skipped'].includes(i.status));
+                        const _isToday = _nextD?.dueDate === today;
                         return (
-                          <tr key={d.id} className={d.status==='overdue'?'row-overdue':''} onClick={() => setSideDebt(d)}>
+                          <tr key={d.id} className={d.status==='overdue'?'row-overdue':_isToday?'row-today':''} onClick={() => setSideDebt(d)}>
                             <td><div className="table-name"><div className="table-avatar" style={{ background:avatarColor(d.name) }}>{d.name[0]?.toUpperCase()}</div><div>{d.name}{d.phone&&<div style={{fontSize:11,color:'var(--text-muted)'}}>{d.phone}</div>}</div></div></td>
                             <td>{d.product}</td>
                             <td className="currency"><strong>R$ {fmt(d.total)}</strong></td>
@@ -954,8 +963,10 @@ export default function App() {
                     const diff = daysDiff(today, inst.dueDate);
                     const d    = new Date(inst.dueDate + 'T00:00:00');
                     let cls = '', diffLabel = null;
-                    if (diff < 0)        { cls = 'row-overdue'; diffLabel = <span style={{color:'var(--color-danger)',fontSize:11}}>{Math.abs(diff)} dias atrasado</span>; }
-                    else if (diff === 0) { cls = 'row-warning'; diffLabel = <span style={{color:'var(--color-warning)',fontSize:11}}>Vence hoje</span>; }
+                    const _ovdRate = parseFloat(debt.interestRate) || 0;
+                    const _ovdVal  = diff < 0 ? parseFloat((inst.value * (1 + _ovdRate/100)).toFixed(2)) : inst.value;
+                    if (diff < 0)        { cls = 'row-overdue'; diffLabel = <span style={{color:'var(--color-danger)',fontSize:11}}>{Math.abs(diff)} dia(s) atrasado</span>; }
+                    else if (diff === 0) { cls = 'row-today';   diffLabel = <span style={{color:'var(--color-danger)',fontSize:11,fontWeight:700}}>⚡ Vence hoje</span>; }
                     else if (diff <= 5)  { cls = 'row-warning'; diffLabel = <span style={{color:'var(--color-warning)',fontSize:11}}>Em {diff} dia(s)</span>; }
                     else                 { diffLabel = <span style={{color:'var(--text-muted)',fontSize:11}}>Em {diff} dias</span>; }
                     return (
@@ -975,8 +986,9 @@ export default function App() {
                           </div>
                           <div style={{display:'flex',alignItems:'center',gap:12}}>
                             <div style={{textAlign:'right'}}>
-                              <div style={{fontSize:18,fontWeight:700}} className="currency">R$ {fmt(inst.value)}</div>
-                              {inst.isPenalty && <div style={{fontSize:11,color:'var(--color-warning)'}}>+{inst.penaltyRate}% juros</div>}
+                              <div style={{fontSize:18,fontWeight:700}} className="currency" style={{color: diff < 0 ? 'var(--color-danger)' : undefined}}>R$ {fmt(_ovdVal)}</div>
+                              {diff < 0 && <div style={{fontSize:11,color:'var(--color-danger)'}}>+{_ovdRate}% juros</div>}
+                              {diff >= 0 && inst.isPenalty && <div style={{fontSize:11,color:'var(--color-warning)'}}>+{inst.penaltyRate}% juros</div>}
                             </div>
                             <div style={{display:'flex',gap:8}} onClick={e => e.stopPropagation()}>
                               {debt.phone && (
@@ -1802,9 +1814,22 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                       </div>
                     );
                   })()}
-                  {!isDone && (
-                    <div style={{fontSize:11,color:'var(--text-muted)'}}>Vence: {fmtD(inst.dueDate)} · R$ {fmt(inst.value)}</div>
-                  )}
+                  {!isDone && (() => {
+                    const _isOvd = today > inst.dueDate;
+                    const _rate  = parseFloat(debt.interestRate) || 0;
+                    const _ovdV  = parseFloat((inst.value * (1 + _rate/100)).toFixed(2));
+                    return _isOvd ? (
+                      <div style={{fontSize:11}}>
+                        <span style={{color:'var(--color-danger)',fontWeight:700}}>⚠ ATRASADO</span>
+                        <span style={{color:'var(--text-muted)'}}> · Venceu {fmtD(inst.dueDate)}</span>
+                        <br/>
+                        <span style={{color:'var(--color-danger)',fontWeight:600}}>R$ {fmt(_ovdV)}</span>
+                        <span style={{color:'var(--text-muted)',fontSize:10}}> (R$ {fmt(inst.value)} + {_rate}% juros)</span>
+                      </div>
+                    ) : (
+                      <div style={{fontSize:11,color:'var(--text-muted)'}}>Vence: {fmtD(inst.dueDate)} · R$ {fmt(inst.value)}</div>
+                    );
+                  })()}
                 </div>
                 {!isDone && (
                   <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>

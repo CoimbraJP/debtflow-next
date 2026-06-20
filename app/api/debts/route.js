@@ -22,6 +22,13 @@ function generateInstallments(debt, paidCount = 0) {
     if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0);
   }
 
+  // Fix 1: recua firstDue por paidCount meses → parcelas pagas ficam no passado
+  if (paidCount > 0) {
+    firstDue.setUTCMonth(firstDue.getUTCMonth() - paidCount);
+    firstDue.setUTCDate(debt.dueDay);
+    if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0);
+  }
+
   for (let i = 0; i < debt.installments; i++) {
     const dueDate = new Date(firstDue);
     dueDate.setUTCMonth(firstDue.getUTCMonth() + i);

@@ -634,6 +634,29 @@ html, body {
   background: rgba(255,165,2,0.04);
 }
 
+/* ── Pulsing row for installments due TODAY ─────────────────────────────── */
+@keyframes pulse-today-row {
+  0%, 100% { background: rgba(255,71,87,0.03); }
+  50%       { background: rgba(255,71,87,0.13); }
+}
+.data-table tbody tr.row-today {
+  animation: pulse-today-row 2s ease-in-out infinite;
+}
+.data-table tbody tr.row-today:hover {
+  background: rgba(255,71,87,0.18);
+  animation: none;
+}
+/* table-container cards (Vencimentos + mobile) */
+[class*="table-container"].row-today {
+  animation: pulse-today-row 2s ease-in-out infinite;
+  border-color: rgba(255,71,87,0.35) !important;
+}
+/* mobile debt card */
+.debt-mobile-card.today {
+  animation: pulse-today-row 2s ease-in-out infinite;
+  border-color: rgba(255,71,87,0.4) !important;
+}
+
 .table-name {
   font-weight: 600;
   color: var(--text-primary);
