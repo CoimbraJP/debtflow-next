@@ -774,58 +774,56 @@ export default function App() {
                     });
                     if (cobrarHoje.length === 0) return null;
                     return (
-                      <div style={{marginBottom:20}}>
-                        <div className="section-header" style={{marginBottom:10}}>
-                          <div>
-                            <div className="section-title" style={{color:'var(--color-danger)',display:'flex',alignItems:'center',gap:8}}>
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                              COBRAR HOJE
-                            </div>
-                            <div className="section-subtitle">{cobrarHoje.length} devedor{cobrarHoje.length>1?'es':''} com vencimento hoje</div>
-                          </div>
+                      <div style={{marginBottom:22,borderRadius:'var(--radius-lg)',border:'1.5px solid rgba(255,71,87,0.3)',overflow:'hidden',background:'rgba(255,71,87,0.03)'}}>
+                        {/* Header */}
+                        <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 18px',borderBottom:'1px solid rgba(255,71,87,0.15)',background:'rgba(255,71,87,0.06)'}}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                          <span style={{fontWeight:700,fontSize:13,color:'var(--color-danger)',letterSpacing:.4}}>COBRAR HOJE</span>
+                          <span style={{marginLeft:'auto',fontSize:11,color:'var(--color-danger)',opacity:.7,fontWeight:500}}>{cobrarHoje.length} vencimento{cobrarHoje.length>1?'s':''}</span>
                         </div>
-                        <div className="table-container desktop-only" style={{padding:0,overflow:'hidden'}}>
-                          <table className="data-table"><tbody>
-                            {cobrarHoje.map(d => {
-                              const fp = d.installmentList?.find(p => !['paid','partial','skipped'].includes(p.status));
-                              const fpIdx = d.installmentList?.indexOf(fp);
-                              return (
-                                <tr key={d.id} className="row-today" onClick={()=>setSideDebt(d)} style={{cursor:'pointer'}}>
-                                  <td><div className="table-name"><div className="table-avatar" style={{background:avatarColor(d.name)}}>{d.name[0]?.toUpperCase()}</div><div style={{fontWeight:700,color:'var(--color-danger)'}}>{d.name}<div style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>{d.phone}</div></div></div></td>
-                                  <td>{d.product}</td>
-                                  <td className="currency" style={{color:'var(--color-danger)',fontWeight:700}}>R$ {fmt(fp?.value)}</td>
-                                  <td>Parcela {fp?.number}/{d.installments}</td>
-                                  <td onClick={e=>e.stopPropagation()} style={{display:'flex',gap:6,padding:'10px 12px'}}>
-                                    {d.phone && fp && <button className="btn btn-sm" style={{background:'#25D366',color:'#fff',border:'none'}} onClick={()=>sendWhatsApp(d,fp)}>Cobrar</button>}
-                                    <button className="btn btn-accent btn-sm" onClick={()=>openPayModal(d,fp,fpIdx)}>Pagar</button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody></table>
-                        </div>
-                        <div className="mobile-only" style={{display:'flex',flexDirection:'column',gap:8}}>
-                          {cobrarHoje.map(d => {
-                            const fp = d.installmentList?.find(p => !['paid','partial','skipped'].includes(p.status));
-                            const fpIdx = d.installmentList?.indexOf(fp);
-                            return (
-                              <div key={d.id} className="debt-mobile-card today" onClick={()=>setSideDebt(d)} style={{cursor:'pointer'}}>
-                                <div className="debt-mobile-card-top">
-                                  <div className="table-avatar" style={{background:avatarColor(d.name),width:44,height:44,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,fontWeight:800,color:'#fff',flexShrink:0}}>{d.name[0]?.toUpperCase()}</div>
-                                  <div className="debt-mobile-card-info">
-                                    <div className="debt-mobile-card-name" style={{color:'var(--color-danger)'}}>{d.name}</div>
-                                    <div className="debt-mobile-card-sub">{d.product} — Parcela {fp?.number}/{d.installments} — R$ {fmt(fp?.value)}</div>
-                                  </div>
-                                  <span style={{background:'var(--color-danger)',color:'#fff',borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:700,flexShrink:0}}>HOJE</span>
-                                </div>
-                                <div className="debt-mobile-card-actions" onClick={e=>e.stopPropagation()}>
-                                  {d.phone && fp && <button className="card-action-btn card-action-cobrar" onClick={()=>sendWhatsApp(d,fp)}>Cobrar</button>}
-                                  <button className="card-action-btn" style={{background:'var(--color-accent)',color:'#fff',border:'none'}} onClick={()=>openPayModal(d,fp,fpIdx)}>Pagar</button>
-                                </div>
+                        {/* Rows */}
+                        {cobrarHoje.map((d,ri) => {
+                          const fp    = d.installmentList?.find(p => !['paid','partial','skipped'].includes(p.status));
+                          const fpIdx = d.installmentList?.indexOf(fp);
+                          return (
+                            <div key={d.id} onClick={()=>setSideDebt(d)} style={{
+                              display:'flex',alignItems:'center',gap:14,padding:'13px 18px',
+                              borderTop: ri>0 ? '1px solid rgba(255,71,87,0.1)' : 'none',
+                              cursor:'pointer',transition:'background .15s',
+                            }}
+                            className="row-today"
+                            onMouseEnter={e=>e.currentTarget.style.background='rgba(255,71,87,0.07)'}
+                            onMouseLeave={e=>e.currentTarget.style.background=''}>
+                              {/* Avatar */}
+                              <div style={{width:38,height:38,borderRadius:'50%',background:avatarColor(d.name),display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:800,color:'#fff',flexShrink:0}}>
+                                {d.name[0]?.toUpperCase()}
                               </div>
-                            );
-                          })}
-                        </div>
+                              {/* Info */}
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontWeight:700,fontSize:14,color:'var(--text-primary)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{d.name}</div>
+                                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>{d.product} · Parcela {fp?.number}/{d.installments}</div>
+                              </div>
+                              {/* Value */}
+                              <div style={{textAlign:'right',flexShrink:0}}>
+                                <div style={{fontWeight:800,fontSize:16,color:'var(--color-danger)'}}>R$ {fmt(fp?.value)}</div>
+                                <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>vence hoje</div>
+                              </div>
+                              {/* Actions */}
+                              <div style={{display:'flex',gap:6,flexShrink:0}} onClick={e=>e.stopPropagation()}>
+                                {d.phone && fp && (
+                                  <button title="Enviar cobrança por WhatsApp" onClick={()=>sendWhatsApp(d,fp)}
+                                    style={{width:34,height:34,borderRadius:'var(--radius-sm)',background:'#25D366',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                                    <svg viewBox="0 0 24 24" fill="#fff" width="16" height="16"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                  </button>
+                                )}
+                                <button onClick={()=>openPayModal(d,fp,fpIdx)}
+                                  style={{height:34,padding:'0 14px',borderRadius:'var(--radius-sm)',background:'var(--color-accent)',color:'#fff',border:'none',fontWeight:700,fontSize:12,cursor:'pointer',flexShrink:0}}>
+                                  Pagar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })()}
@@ -1723,6 +1721,9 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
       } else if (inst.status === 'partial') {
         const saldo = Math.max(0, (inst.value || 0) - (inst.paidAmount || 0));
         interest += parseFloat((saldo * rate / 100).toFixed(2));
+      } else if (inst.status === 'paid' && (inst.lateInterestPaid || 0) > 0) {
+        // Juros de atraso pagos diretamente (pagamento tardio c/ taxa)
+        interest += inst.lateInterestPaid;
       } else if (inst.status === 'paid' && inst.penaltyApplied && inst.penaltyRate > 0) {
         interest += Math.max(0, (inst.value || 0) - (inst.originalValue || 0));
       }
