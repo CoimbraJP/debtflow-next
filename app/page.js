@@ -1700,8 +1700,8 @@ function ActivityList({ items }) {
 
 function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWhatsApp }) {
   // Estado local para juros manuais (indexado por idx da parcela)
-  const [manualInputs, setManualInputs] = React.useState({});
-  const [savingManual, setSavingManual] = React.useState({});
+  const [manualInputs, setManualInputs] = useState({});
+  const [savingManual, setSavingManual] = useState({});
 
   async function saveManualInterest(idx, value) {
     const v = parseFloat(value) || 0;
