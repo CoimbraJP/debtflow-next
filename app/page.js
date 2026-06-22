@@ -38,6 +38,14 @@ function avatarColor(name) {
   return AVATAR_COLORS[s % AVATAR_COLORS.length];
 }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
 
 // ── WhatsApp helpers ──────────────────────────────────────────────────────
 function buildMsg(template, debt, inst, extra = {}) {
@@ -419,6 +427,258 @@ export default function App() {
     URL.revokeObjectURL(url);
     toast('Dados exportados!', 'success', 'Exportado');
   }
+  async function exportPDF() {
+    try {
+      await loadScript('/libs/jspdf.min.js');
+      await loadScript('/libs/jspdf-autotable.min.js');
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const W = doc.internal.pageSize.width;
+      const H = doc.internal.pageSize.height;
+
+      // Palette
+      const DARK   = [15, 23, 42];
+      const ACCENT = [99, 102, 241];
+      const GREEN  = [16, 185, 129];
+      const RED    = [239, 68, 68];
+      const AMBER  = [245, 158, 11];
+      const SLATE  = [148, 163, 184];
+
+      // ── Header bar ──────────────────────────────────────────────
+      doc.setFillColor(...DARK);
+      doc.rect(0, 0, W, 30, 'F');
+
+      // DF monogram
+      doc.setFillColor(...ACCENT);
+      doc.roundedRect(10, 7, 16, 16, 2, 2, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('DF', 18, 17, { align: 'center' });
+
+      // Title
+      doc.setFontSize(15);
+      doc.text('DebtFlow', 30, 14);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SLATE);
+      doc.text('Relatório de Dívidas', 30, 21);
+
+      // Export date (top-right)
+      const exportDate = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+      doc.setFontSize(7.5);
+      doc.text(`Exportado em: ${exportDate}`, W - 10, 14, { align: 'right' });
+      if (debts.length > 0 && debts[0].tenant) {
+        doc.text(`Tenant: ${debts[0].tenant}`, W - 10, 21, { align: 'right' });
+      }
+
+      // ── Summary cards ────────────────────────────────────────────
+      const totalValue   = debts.reduce((s, d) => s + (d.total || 0), 0);
+      const overdueCount = debts.filter(d => d.status === 'overdue').length;
+      const paidCount    = debts.filter(d => d.status === 'paid').length;
+      const pendingCount = debts.filter(d => d.status === 'pending').length;
+
+      const cardY = 34, cardH = 22;
+      const cardW = (W - 30) / 4;
+      const cards = [
+        { label: 'Total de Dívidas',  value: String(debts.length),      color: ACCENT },
+        { label: 'Valor Total (R$)',   value: `R$ ${fmt(totalValue)}`,   color: ACCENT },
+        { label: 'Em Atraso',          value: String(overdueCount),      color: RED    },
+        { label: 'Quitadas',           value: String(paidCount),         color: GREEN  },
+      ];
+      cards.forEach((card, i) => {
+        const x = 10 + i * (cardW + 2.5);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(x, cardY, cardW, cardH, 2, 2, 'F');
+        doc.setFillColor(...card.color);
+        doc.roundedRect(x, cardY, 3, cardH, 1, 1, 'F');
+        doc.setTextColor(100, 116, 139);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.text(card.label, x + 6, cardY + 8);
+        doc.setTextColor(...DARK);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text(card.value, x + 6, cardY + 17);
+      });
+
+      // ── Main debts table ─────────────────────────────────────────
+      const statusLabel = { pending: 'Pendente', overdue: 'Em Atraso', paid: 'Quitada' };
+      const statusColor = { pending: AMBER, overdue: RED, paid: GREEN };
+
+      const rows = debts.map(d => [
+        d.name || '—',
+        d.product || '—',
+        `R$ ${fmt(d.total)}`,
+        String(d.installments || 1),
+        String(d.dueDay || '—'),
+        statusLabel[d.status] || d.status,
+        `${d.interestRate || 0}%`,
+      ]);
+
+      doc.autoTable({
+        startY: cardY + cardH + 5,
+        head: [['Devedor', 'Produto', 'Total', 'Parcelas', 'Dia Venc.', 'Status', 'Juros']],
+        body: rows,
+        theme: 'grid',
+        headStyles: {
+          fillColor: DARK, textColor: [255, 255, 255],
+          fontStyle: 'bold', fontSize: 8, cellPadding: 3,
+        },
+        bodyStyles: { fontSize: 8, cellPadding: 2.5, textColor: [...DARK] },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { cellWidth: 42 },
+          1: { cellWidth: 42 },
+          2: { cellWidth: 28, halign: 'right' },
+          3: { cellWidth: 18, halign: 'center' },
+          4: { cellWidth: 18, halign: 'center' },
+          5: { cellWidth: 24, halign: 'center' },
+          6: { cellWidth: 16, halign: 'center' },
+        },
+        didDrawCell: (data) => {
+          if (data.column.index === 5 && data.section === 'body') {
+            const debt = debts[data.row.index];
+            const c = statusColor[debt?.status];
+            if (c) {
+              const { x, y, width, height } = data.cell;
+              doc.setFillColor(...c);
+              doc.roundedRect(x + 1.5, y + 1.5, width - 3, height - 3, 1.5, 1.5, 'F');
+              doc.setTextColor(255, 255, 255);
+              doc.setFontSize(7);
+              doc.setFont('helvetica', 'bold');
+              doc.text(statusLabel[debt.status] || debt.status, x + width / 2, y + height / 2 + 1, { align: 'center' });
+            }
+          }
+        },
+        margin: { left: 10, right: 10 },
+      });
+
+      // ── Footer on each page ──────────────────────────────────────
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFillColor(...DARK);
+        doc.rect(0, H - 9, W, 9, 'F');
+        doc.setTextColor(...SLATE);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.text('DebtFlow — Documento Confidencial', 10, H - 3);
+        doc.text(`Página ${i} de ${pageCount}`, W - 10, H - 3, { align: 'right' });
+      }
+
+      doc.save(`debtflow-relatorio-${today}.pdf`);
+      toast('PDF exportado!', 'success', 'Exportado');
+    } catch (e) {
+      console.error(e);
+      toast('Erro ao gerar PDF', 'danger', 'Erro');
+    }
+  }
+
+  async function exportXLS() {
+    try {
+      await loadScript('/libs/xlsx.min.js');
+      const XLSX = window.XLSX;
+      const wb = XLSX.utils.book_new();
+      const statusPT = { pending: 'Pendente', overdue: 'Em Atraso', paid: 'Quitada' };
+
+      // ── Sheet 1: Resumo ──────────────────────────────────────────
+      const totalValue   = debts.reduce((s, d) => s + (d.total || 0), 0);
+      const overdueDebts = debts.filter(d => d.status === 'overdue');
+      const paidDebts    = debts.filter(d => d.status === 'paid');
+      const totalParcelas = debts.reduce((s, d) => s + (d.installmentList?.length || 0), 0);
+      const parcelasPagas = debts.reduce((s, d) => s + (d.installmentList?.filter(p => p.status === 'paid').length || 0), 0);
+
+      const wsResumo = XLSX.utils.aoa_to_sheet([
+        ['DebtFlow — Resumo do Backup'],
+        [`Exportado em: ${new Date().toLocaleDateString('pt-BR')}`],
+        [],
+        ['Métrica', 'Valor'],
+        ['Total de Dívidas', debts.length],
+        ['Valor Total (R$)', totalValue],
+        ['Em Atraso (qtd)', overdueDebts.length],
+        ['Em Atraso (R$)', overdueDebts.reduce((s, d) => s + (d.total || 0), 0)],
+        ['Quitadas (qtd)', paidDebts.length],
+        ['Quitadas (R$)', paidDebts.reduce((s, d) => s + (d.total || 0), 0)],
+        ['Pendentes (qtd)', debts.filter(d => d.status === 'pending').length],
+        ['Total de Parcelas', totalParcelas],
+        ['Parcelas Pagas', parcelasPagas],
+        [],
+        ['Configurações'],
+        ['Juros Padrão (%)', settings?.defaultInterest || 0],
+        ['API URL', settings?.apiUrl || '—'],
+        ['Instância WhatsApp', settings?.instance || '—'],
+      ]);
+      wsResumo['!cols'] = [{ wch: 28 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo');
+
+      // ── Sheet 2: Dívidas ─────────────────────────────────────────
+      const dividasRows = debts.map(d => [
+        d.name || '', d.phone || '', d.address || '', d.product || '',
+        d.total || 0, d.installments || 1, d.dueDay || '',
+        d.interestRate || 0, d.entrada || 0,
+        statusPT[d.status] || d.status,
+        d.notes || '',
+        d.createdAt ? new Date(d.createdAt).toLocaleDateString('pt-BR') : '',
+      ]);
+      const wsDividas = XLSX.utils.aoa_to_sheet([
+        ['Nome', 'Telefone', 'Endereço', 'Produto', 'Total (R$)', 'Parcelas', 'Dia Venc.', 'Juros (%)', 'Entrada (R$)', 'Status', 'Notas', 'Criado em'],
+        ...dividasRows,
+      ]);
+      wsDividas['!cols'] = [
+        {wch:25},{wch:15},{wch:30},{wch:25},{wch:14},
+        {wch:10},{wch:10},{wch:10},{wch:14},{wch:12},{wch:30},{wch:14},
+      ];
+      XLSX.utils.book_append_sheet(wb, wsDividas, 'Dívidas');
+
+      // ── Sheet 3: Parcelas ────────────────────────────────────────
+      const parcelasRows = [];
+      for (const d of debts) {
+        for (const p of (d.installmentList || [])) {
+          parcelasRows.push([
+            d.name || '', d.product || '',
+            p.number, p.value || 0, p.originalValue || 0,
+            fmtDate(p.dueDate),
+            statusPT[p.status] || p.status,
+            fmtDate(p.paidDate),
+            p.paidAmount || 0,
+            p.penaltyRate || 0,
+            p.isEntrada ? 'Sim' : 'Não',
+            p.manualInterest || 0,
+          ]);
+        }
+      }
+      const wsParcelas = XLSX.utils.aoa_to_sheet([
+        ['Devedor', 'Produto', 'Nº Parcela', 'Valor (R$)', 'Valor Original (R$)', 'Vencimento', 'Status', 'Pago em', 'Valor Pago (R$)', 'Multa (%)', 'É Entrada', 'Juros Manual'],
+        ...parcelasRows,
+      ]);
+      wsParcelas['!cols'] = [
+        {wch:25},{wch:20},{wch:12},{wch:14},{wch:18},
+        {wch:12},{wch:12},{wch:12},{wch:14},{wch:10},{wch:10},{wch:14},
+      ];
+      XLSX.utils.book_append_sheet(wb, wsParcelas, 'Parcelas');
+
+      // ── Sheet 4: Atividade ───────────────────────────────────────
+      const atividadeRows = activity.map(a => [
+        a.ts ? new Date(a.ts).toLocaleString('pt-BR') : '',
+        a.type || '',
+        a.text || '',
+      ]);
+      const wsAtividade = XLSX.utils.aoa_to_sheet([
+        ['Data/Hora', 'Tipo', 'Descrição'],
+        ...atividadeRows,
+      ]);
+      wsAtividade['!cols'] = [{wch:20},{wch:12},{wch:80}];
+      XLSX.utils.book_append_sheet(wb, wsAtividade, 'Atividade');
+
+      XLSX.writeFile(wb, `debtflow-backup-${today}.xlsx`);
+      toast('Excel exportado!', 'success', 'Exportado');
+    } catch (e) {
+      console.error(e);
+      toast('Erro ao gerar Excel', 'danger', 'Erro');
+    }
+  }
+
   function importData(e) {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
@@ -1155,8 +1415,30 @@ export default function App() {
                 </div>
                 <div className="settings-card-subtitle">Exportar backup ou importar dados</div>
                 <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-                  <button className="btn btn-ghost btn-sm" onClick={exportData}>Exportar JSON</button>
+                  <button className="btn btn-ghost btn-sm" onClick={exportData}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                    Exportar JSON
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={exportPDF}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                      <line x1="9" y1="15" x2="15" y2="15"/>
+                    </svg>
+                    Exportar PDF
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={exportXLS}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}>
+                      <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>
+                    </svg>
+                    Exportar XLS
+                  </button>
                   <label className="btn btn-ghost btn-sm" style={{cursor:'pointer'}}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
                     Importar JSON
                     <input type="file" accept=".json" onChange={importData} style={{display:'none'}} />
                   </label>
