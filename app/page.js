@@ -527,14 +527,15 @@ export default function App() {
         },
         bodyStyles: { fontSize: 8, cellPadding: 2.5, textColor: [...DARK] },
         alternateRowStyles: { fillColor: [248, 250, 252] },
+        tableWidth: W - 20,
         columnStyles: {
-          0: { cellWidth: 42 },
-          1: { cellWidth: 42 },
-          2: { cellWidth: 28, halign: 'right' },
-          3: { cellWidth: 18, halign: 'center' },
-          4: { cellWidth: 18, halign: 'center' },
-          5: { cellWidth: 24, halign: 'center' },
-          6: { cellWidth: 16, halign: 'center' },
+          0: { cellWidth: 70, halign: 'left' },
+          1: { cellWidth: 62, halign: 'left' },
+          2: { cellWidth: 34, halign: 'right' },
+          3: { cellWidth: 22, halign: 'center' },
+          4: { cellWidth: 22, halign: 'center' },
+          5: { cellWidth: 41, halign: 'center' },
+          6: { cellWidth: 26, halign: 'center' },
         },
         didDrawCell: (data) => {
           if (data.column.index === 5 && data.section === 'body') {
@@ -577,99 +578,222 @@ export default function App() {
 
   async function exportXLS() {
     try {
-      await loadScript('/libs/xlsx.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js');
       const XLSX = window.XLSX;
       const wb = XLSX.utils.book_new();
       const statusPT = { pending: 'Pendente', overdue: 'Em Atraso', paid: 'Quitada' };
 
-      // ── Sheet 1: Resumo ──────────────────────────────────────────
-      const totalValue   = debts.reduce((s, d) => s + (d.total || 0), 0);
-      const overdueDebts = debts.filter(d => d.status === 'overdue');
-      const paidDebts    = debts.filter(d => d.status === 'paid');
+      // ── Style tokens ────────────────────────────────────────────
+      const DARK    = '0F172A';
+      const ACCENT  = '6366F1';
+      const GREEN   = '10B981';
+      const RED     = 'EF4444';
+      const AMBER   = 'F59E0B';
+      const SLATE   = '64748B';
+      const LIGHT   = 'F8FAFC';
+      const WHITE   = 'FFFFFF';
+      const BORDER  = { style: 'thin', color: { rgb: 'E2E8F0' } };
+
+      const ST = {
+        titleBg:   { font: { bold: true, sz: 18, color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK } }, alignment: { horizontal: 'left', vertical: 'center' } },
+        subtitleBg:{ font: { sz: 9, color: { rgb: '94A3B8' } }, fill: { fgColor: { rgb: DARK } } },
+        kpiLabel:  { font: { sz: 8, color: { rgb: SLATE }, italic: true }, fill: { fgColor: { rgb: LIGHT } }, border: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER } },
+        kpiVal:    { font: { bold: true, sz: 14, color: { rgb: DARK } }, fill: { fgColor: { rgb: WHITE } }, alignment: { horizontal: 'left' }, border: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER } },
+        kpiRed:    { font: { bold: true, sz: 14, color: { rgb: RED } }, fill: { fgColor: { rgb: 'FEF2F2' } }, alignment: { horizontal: 'left' }, border: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER } },
+        kpiGreen:  { font: { bold: true, sz: 14, color: { rgb: GREEN } }, fill: { fgColor: { rgb: 'F0FDF4' } }, alignment: { horizontal: 'left' }, border: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER } },
+        kpiAmber:  { font: { bold: true, sz: 14, color: { rgb: AMBER } }, fill: { fgColor: { rgb: 'FFFBEB' } }, alignment: { horizontal: 'left' }, border: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER } },
+        secHeader: { font: { bold: true, sz: 10, color: { rgb: ACCENT } }, fill: { fgColor: { rgb: 'EEF2FF' } }, border: { bottom: { style: 'medium', color: { rgb: ACCENT } } } },
+        colHeader: { font: { bold: true, sz: 8, color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: { right: BORDER, bottom: BORDER } },
+        colHeaderL:{ font: { bold: true, sz: 8, color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK } }, alignment: { horizontal: 'left', vertical: 'center' }, border: { right: BORDER, bottom: BORDER } },
+        rowEven:   { fill: { fgColor: { rgb: LIGHT } }, font: { sz: 8 }, border: { bottom: BORDER, right: BORDER } },
+        rowOdd:    { fill: { fgColor: { rgb: WHITE } }, font: { sz: 8 }, border: { bottom: BORDER, right: BORDER } },
+        rowEvenR:  { fill: { fgColor: { rgb: LIGHT } }, font: { sz: 8 }, alignment: { horizontal: 'right' }, border: { bottom: BORDER, right: BORDER }, numFmt: '"R$ "#,##0.00' },
+        rowOddR:   { fill: { fgColor: { rgb: WHITE } }, font: { sz: 8 }, alignment: { horizontal: 'right' }, border: { bottom: BORDER, right: BORDER }, numFmt: '"R$ "#,##0.00' },
+        rowEvenC:  { fill: { fgColor: { rgb: LIGHT } }, font: { sz: 8 }, alignment: { horizontal: 'center' }, border: { bottom: BORDER, right: BORDER } },
+        rowOddC:   { fill: { fgColor: { rgb: WHITE } }, font: { sz: 8 }, alignment: { horizontal: 'center' }, border: { bottom: BORDER, right: BORDER } },
+        stPending: { font: { bold: true, sz: 8, color: { rgb: WHITE } }, fill: { fgColor: { rgb: AMBER } }, alignment: { horizontal: 'center' }, border: { bottom: BORDER, right: BORDER } },
+        stOverdue: { font: { bold: true, sz: 8, color: { rgb: WHITE } }, fill: { fgColor: { rgb: RED } }, alignment: { horizontal: 'center' }, border: { bottom: BORDER, right: BORDER } },
+        stPaid:    { font: { bold: true, sz: 8, color: { rgb: WHITE } }, fill: { fgColor: { rgb: GREEN } }, alignment: { horizontal: 'center' }, border: { bottom: BORDER, right: BORDER } },
+        empty:     { fill: { fgColor: { rgb: DARK } } },
+      };
+
+      function cell(v, s)  { return { v, s, t: typeof v === 'number' ? 'n' : 's' }; }
+      function money(v, s) { return { v, s, t: 'n', z: '"R$ "#,##0.00' }; }
+      function pct(v, s)   { return { v, s, t: 'n', z: '0.00%' }; }
+
+      // ── Compute KPIs ────────────────────────────────────────────
+      const totalValue    = debts.reduce((s, d) => s + (d.total || 0), 0);
+      const overdueDebts  = debts.filter(d => d.status === 'overdue');
+      const paidDebts     = debts.filter(d => d.status === 'paid');
+      const pendingDebts  = debts.filter(d => d.status === 'pending');
       const totalParcelas = debts.reduce((s, d) => s + (d.installmentList?.length || 0), 0);
       const parcelasPagas = debts.reduce((s, d) => s + (d.installmentList?.filter(p => p.status === 'paid').length || 0), 0);
+      const totalRecebido = debts.reduce((s, d) => s + (d.installmentList?.filter(p => p.status === 'paid').reduce((a, p) => a + (p.paidAmount || 0), 0) || 0), 0);
+      const totalEmAberto = totalValue - totalRecebido;
+      const inadimplencia = debts.length > 0 ? overdueDebts.length / debts.length : 0;
+      const taxaPagamento = totalParcelas > 0 ? parcelasPagas / totalParcelas : 0;
+      const ticketMedio   = debts.length > 0 ? totalValue / debts.length : 0;
 
-      const wsResumo = XLSX.utils.aoa_to_sheet([
-        ['DebtFlow — Resumo do Backup'],
-        [`Exportado em: ${new Date().toLocaleDateString('pt-BR')}`],
-        [],
-        ['Métrica', 'Valor'],
-        ['Total de Dívidas', debts.length],
-        ['Valor Total (R$)', totalValue],
-        ['Em Atraso (qtd)', overdueDebts.length],
-        ['Em Atraso (R$)', overdueDebts.reduce((s, d) => s + (d.total || 0), 0)],
-        ['Quitadas (qtd)', paidDebts.length],
-        ['Quitadas (R$)', paidDebts.reduce((s, d) => s + (d.total || 0), 0)],
-        ['Pendentes (qtd)', debts.filter(d => d.status === 'pending').length],
-        ['Total de Parcelas', totalParcelas],
-        ['Parcelas Pagas', parcelasPagas],
-        [],
-        ['Configurações'],
-        ['Juros Padrão (%)', settings?.defaultInterest || 0],
-        ['API URL', settings?.apiUrl || '—'],
-        ['Instância WhatsApp', settings?.instance || '—'],
-      ]);
-      wsResumo['!cols'] = [{ wch: 28 }, { wch: 22 }];
-      XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo');
+      // ── Sheet 1: Dashboard ───────────────────────────────────────
+      const R = (v, s) => ({ v, t: typeof v === 'number' ? 'n' : 's', s });
+      const E = () => R('', ST.empty);
 
-      // ── Sheet 2: Dívidas ─────────────────────────────────────────
-      const dividasRows = debts.map(d => [
-        d.name || '', d.phone || '', d.address || '', d.product || '',
-        d.total || 0, d.installments || 1, d.dueDay || '',
-        d.interestRate || 0, d.entrada || 0,
-        statusPT[d.status] || d.status,
-        d.notes || '',
-        d.createdAt ? new Date(d.createdAt).toLocaleDateString('pt-BR') : '',
-      ]);
-      const wsDividas = XLSX.utils.aoa_to_sheet([
-        ['Nome', 'Telefone', 'Endereço', 'Produto', 'Total (R$)', 'Parcelas', 'Dia Venc.', 'Juros (%)', 'Entrada (R$)', 'Status', 'Notas', 'Criado em'],
-        ...dividasRows,
-      ]);
-      wsDividas['!cols'] = [
-        {wch:25},{wch:15},{wch:30},{wch:25},{wch:14},
-        {wch:10},{wch:10},{wch:10},{wch:14},{wch:12},{wch:30},{wch:14},
+      const dashRows = [
+        // Row 1-2: Header
+        [R('DebtFlow — Painel Executivo', ST.titleBg), E(), E(), E(), E(), E(), E(), E(), E(), E()],
+        [R(`Exportado em ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`, ST.subtitleBg), E(), E(), E(), E(), E(), E(), E(), E(), E()],
+        // Row 3: spacer
+        Array(10).fill(R('', {})),
+        // Row 4: KPI labels
+        [R('📊 CLIENTES', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('💰 CARTEIRA', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('📈 DESEMPENHO', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel)],
+        // Row 5: KPI values - main numbers
+        [R(debts.length, ST.kpiVal), R('', ST.kpiVal), R('', ST.kpiVal),
+         money(totalValue, ST.kpiGreen), R('', ST.kpiGreen), R('', ST.kpiGreen),
+         money(totalRecebido, ST.kpiGreen), R('', ST.kpiGreen), R('', ST.kpiGreen), R('', ST.kpiGreen)],
+        // Row 6: KPI sub-label
+        [R('Total de Clientes', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('Valor Total da Carteira', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('Total Recebido', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel)],
+        // Row 7: spacer
+        Array(10).fill(R('', {})),
+        // Row 8: KPI labels row 2
+        [R('🔴 EM ATRASO', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('🟡 EM ABERTO', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('✅ QUITADAS', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel)],
+        // Row 9: KPI values row 2
+        [R(overdueDebts.length, ST.kpiRed), R('', ST.kpiRed), R('', ST.kpiRed),
+         money(totalEmAberto, ST.kpiAmber), R('', ST.kpiAmber), R('', ST.kpiAmber),
+         R(paidDebts.length, ST.kpiGreen), R('', ST.kpiGreen), R('', ST.kpiGreen), R('', ST.kpiGreen)],
+        // Row 10: KPI sub-label row 2
+        [R(`Inadimplência: ${(inadimplencia * 100).toFixed(1)}%`, ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R('Valor não recebido', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel),
+         R(`Taxa pag.: ${(taxaPagamento * 100).toFixed(1)}%`, ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel), R('', ST.kpiLabel)],
+        // Row 11: spacer
+        Array(10).fill(R('', {})),
+        // Row 12: section header
+        [R('🏆 TOP DEVEDORES POR VALOR', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader), R('', ST.secHeader)],
+        // Row 13: column headers
+        [R('Nome', ST.colHeaderL), R('Produto', ST.colHeaderL), R('Total (R$)', ST.colHeader), R('Parcelas', ST.colHeader), R('Dia Venc.', ST.colHeader), R('Juros %', ST.colHeader), R('Status', ST.colHeader), R('Pagas', ST.colHeader), R('Ticket', ST.colHeader), R('Progresso', ST.colHeader)],
       ];
-      XLSX.utils.book_append_sheet(wb, wsDividas, 'Dívidas');
 
-      // ── Sheet 3: Parcelas ────────────────────────────────────────
-      const parcelasRows = [];
+      // Top 10 debtors
+      const sorted = [...debts].sort((a, b) => (b.total || 0) - (a.total || 0)).slice(0, 15);
+      sorted.forEach((d, i) => {
+        const even = i % 2 === 0;
+        const rs = even ? ST.rowEven : ST.rowOdd;
+        const rsR = even ? ST.rowEvenR : ST.rowOddR;
+        const rsC = even ? ST.rowEvenC : ST.rowOddC;
+        const paid = d.installmentList?.filter(p => p.status === 'paid').length || 0;
+        const tot  = d.installmentList?.length || 1;
+        const stStyle = d.status === 'paid' ? ST.stPaid : d.status === 'overdue' ? ST.stOverdue : ST.stPending;
+        dashRows.push([
+          R(d.name || '', rs), R(d.product || '', rs),
+          money(d.total || 0, rsR), R(d.installments || 1, rsC),
+          R(d.dueDay || '', rsC), R(`${d.interestRate || 0}%`, rsC),
+          R(statusPT[d.status] || d.status, stStyle),
+          R(`${paid}/${tot}`, rsC),
+          money(d.total > 0 ? d.total / (d.installments || 1) : 0, rsR),
+          R(`${Math.round((paid / tot) * 100)}%`, rsC),
+        ]);
+      });
+
+      const wsDash = XLSX.utils.aoa_to_sheet(dashRows);
+
+      // Merges: header spans full width, KPI cards span 3 cols each
+      wsDash['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }, // title
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } }, // subtitle
+        // KPI row 1 cards
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 2 } }, { s: { r: 3, c: 3 }, e: { r: 3, c: 5 } }, { s: { r: 3, c: 6 }, e: { r: 3, c: 9 } },
+        { s: { r: 4, c: 0 }, e: { r: 4, c: 2 } }, { s: { r: 4, c: 3 }, e: { r: 4, c: 5 } }, { s: { r: 4, c: 6 }, e: { r: 4, c: 9 } },
+        { s: { r: 5, c: 0 }, e: { r: 5, c: 2 } }, { s: { r: 5, c: 3 }, e: { r: 5, c: 5 } }, { s: { r: 5, c: 6 }, e: { r: 5, c: 9 } },
+        // KPI row 2 cards
+        { s: { r: 7, c: 0 }, e: { r: 7, c: 2 } }, { s: { r: 7, c: 3 }, e: { r: 7, c: 5 } }, { s: { r: 7, c: 6 }, e: { r: 7, c: 9 } },
+        { s: { r: 8, c: 0 }, e: { r: 8, c: 2 } }, { s: { r: 8, c: 3 }, e: { r: 8, c: 5 } }, { s: { r: 8, c: 6 }, e: { r: 8, c: 9 } },
+        { s: { r: 9, c: 0 }, e: { r: 9, c: 2 } }, { s: { r: 9, c: 3 }, e: { r: 9, c: 5 } }, { s: { r: 9, c: 6 }, e: { r: 9, c: 9 } },
+        // Section header
+        { s: { r: 11, c: 0 }, e: { r: 11, c: 9 } },
+      ];
+      wsDash['!cols'] = [
+        {wch: 28}, {wch: 22}, {wch: 14}, {wch: 10}, {wch: 10}, {wch: 10}, {wch: 12}, {wch: 10}, {wch: 14}, {wch: 12}
+      ];
+      wsDash['!rows'] = [
+        { hpt: 36 }, { hpt: 20 }, { hpt: 10 },
+        { hpt: 16 }, { hpt: 30 }, { hpt: 16 },
+        { hpt: 10 },
+        { hpt: 16 }, { hpt: 30 }, { hpt: 16 },
+        { hpt: 10 }, { hpt: 20 }, { hpt: 22 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsDash, '📊 Dashboard');
+
+      // ── Sheet 2: Dívidas (styled) ────────────────────────────────
+      const divHeaders = ['Nome', 'Telefone', 'Produto', 'Total (R$)', 'Parcelas', 'Entrada (R$)', 'Dia Venc.', 'Juros %', 'Status', 'Notas', 'Criado em'];
+      const divRows = [divHeaders.map((h, i) => R(h, i < 3 ? ST.colHeaderL : ST.colHeader))];
+      debts.forEach((d, i) => {
+        const even = i % 2 === 0;
+        const rs = even ? ST.rowEven : ST.rowOdd;
+        const rsR = even ? ST.rowEvenR : ST.rowOddR;
+        const rsC = even ? ST.rowEvenC : ST.rowOddC;
+        const stStyle = d.status === 'paid' ? ST.stPaid : d.status === 'overdue' ? ST.stOverdue : ST.stPending;
+        divRows.push([
+          R(d.name || '', rs), R(d.phone || '', rs), R(d.product || '', rs),
+          money(d.total || 0, rsR), R(d.installments || 1, rsC),
+          money(d.entrada || 0, rsR), R(d.dueDay || '', rsC),
+          R(`${d.interestRate || 0}%`, rsC),
+          R(statusPT[d.status] || d.status, stStyle),
+          R(d.notes || '', rs),
+          R(d.createdAt ? new Date(d.createdAt).toLocaleDateString('pt-BR') : '', rsC),
+        ]);
+      });
+      const wsDividas = XLSX.utils.aoa_to_sheet(divRows);
+      wsDividas['!cols'] = [{wch:26},{wch:16},{wch:24},{wch:14},{wch:10},{wch:14},{wch:10},{wch:10},{wch:13},{wch:28},{wch:13}];
+      wsDividas['!rows'] = [{ hpt: 22 }];
+      XLSX.utils.book_append_sheet(wb, wsDividas, '📋 Dívidas');
+
+      // ── Sheet 3: Parcelas (styled) ───────────────────────────────
+      const parHeaders = ['Devedor', 'Produto', 'Nº', 'Valor (R$)', 'Vencimento', 'Status', 'Pago em', 'Pago (R$)', 'Entrada?', 'Juros Manual'];
+      const parRows = [parHeaders.map((h, i) => R(h, i < 2 ? ST.colHeaderL : ST.colHeader))];
       for (const d of debts) {
-        for (const p of (d.installmentList || [])) {
-          parcelasRows.push([
-            d.name || '', d.product || '',
-            p.number, p.value || 0, p.originalValue || 0,
-            fmtDate(p.dueDate),
-            statusPT[p.status] || p.status,
-            fmtDate(p.paidDate),
-            p.paidAmount || 0,
-            p.penaltyRate || 0,
-            p.isEntrada ? 'Sim' : 'Não',
-            p.manualInterest || 0,
+        for (const [i, p] of (d.installmentList || []).entries()) {
+          const even = (parRows.length - 1) % 2 === 0;
+          const rs = even ? ST.rowEven : ST.rowOdd;
+          const rsR = even ? ST.rowEvenR : ST.rowOddR;
+          const rsC = even ? ST.rowEvenC : ST.rowOddC;
+          const stStyle = p.status === 'paid' ? ST.stPaid : p.status === 'overdue' ? ST.stOverdue : ST.stPending;
+          parRows.push([
+            R(d.name || '', rs), R(d.product || '', rs),
+            R(p.number, rsC), money(p.value || 0, rsR),
+            R(fmtDate(p.dueDate), rsC),
+            R(statusPT[p.status] || p.status, stStyle),
+            R(fmtDate(p.paidDate), rsC), money(p.paidAmount || 0, rsR),
+            R(p.isEntrada ? '✓' : '', rsC), money(p.manualInterest || 0, rsR),
           ]);
         }
       }
-      const wsParcelas = XLSX.utils.aoa_to_sheet([
-        ['Devedor', 'Produto', 'Nº Parcela', 'Valor (R$)', 'Valor Original (R$)', 'Vencimento', 'Status', 'Pago em', 'Valor Pago (R$)', 'Multa (%)', 'É Entrada', 'Juros Manual'],
-        ...parcelasRows,
-      ]);
-      wsParcelas['!cols'] = [
-        {wch:25},{wch:20},{wch:12},{wch:14},{wch:18},
-        {wch:12},{wch:12},{wch:12},{wch:14},{wch:10},{wch:10},{wch:14},
-      ];
-      XLSX.utils.book_append_sheet(wb, wsParcelas, 'Parcelas');
+      const wsParcelas = XLSX.utils.aoa_to_sheet(parRows);
+      wsParcelas['!cols'] = [{wch:26},{wch:20},{wch:6},{wch:14},{wch:12},{wch:13},{wch:12},{wch:14},{wch:9},{wch:14}];
+      wsParcelas['!rows'] = [{ hpt: 22 }];
+      XLSX.utils.book_append_sheet(wb, wsParcelas, '📅 Parcelas');
 
-      // ── Sheet 4: Atividade ───────────────────────────────────────
-      const atividadeRows = activity.map(a => [
-        a.ts ? new Date(a.ts).toLocaleString('pt-BR') : '',
-        a.type || '',
-        a.text || '',
-      ]);
-      const wsAtividade = XLSX.utils.aoa_to_sheet([
-        ['Data/Hora', 'Tipo', 'Descrição'],
-        ...atividadeRows,
-      ]);
-      wsAtividade['!cols'] = [{wch:20},{wch:12},{wch:80}];
-      XLSX.utils.book_append_sheet(wb, wsAtividade, 'Atividade');
+      // ── Sheet 4: Atividade (styled) ──────────────────────────────
+      const atHeaders = ['Data/Hora', 'Tipo', 'Descrição'];
+      const atRows = [atHeaders.map(h => R(h, h === 'Descrição' ? ST.colHeaderL : ST.colHeader))];
+      for (const [i, a] of activity.entries()) {
+        const even = i % 2 === 0;
+        const rs = even ? ST.rowEven : ST.rowOdd;
+        const rsC = even ? ST.rowEvenC : ST.rowOddC;
+        atRows.push([
+          R(a.ts ? new Date(a.ts).toLocaleString('pt-BR') : '', rsC),
+          R(a.type || '', rsC),
+          R((a.text || '').replace(/<[^>]*>/g, ''), rs),
+        ]);
+      }
+      const wsAtividade = XLSX.utils.aoa_to_sheet(atRows);
+      wsAtividade['!cols'] = [{wch:22},{wch:12},{wch:80}];
+      wsAtividade['!rows'] = [{ hpt: 22 }];
+      XLSX.utils.book_append_sheet(wb, wsAtividade, '📝 Atividade');
 
       XLSX.writeFile(wb, `debtflow-backup-${today}.xlsx`);
       toast('Excel exportado!', 'success', 'Exportado');
