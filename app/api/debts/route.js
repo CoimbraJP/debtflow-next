@@ -4,25 +4,47 @@ import { Debt }         from '@/lib/models/Debt';
 import { Activity }     from '@/lib/models/Activity';
 
 function generateInstallments(debt, paidCount = 0) {
-  const list      = [];
-  const instValue = parseFloat((debt.total / debt.installments).toFixed(2));
-  const startDate = new Date(debt.createdAt + 'T00:00:00Z');
+  const list       = [];
+  const hasEntrada = (debt.entrada || 0) > 0.009;
+  const entradaVal = hasEntrada ? parseFloat(parseFloat(debt.entrada).toFixed(2)) : 0;
+  const remaining  = parseFloat((debt.total - entradaVal).toFixed(2));
+  const instValue  = parseFloat((remaining / debt.installments).toFixed(2));
+  const startDate  = new Date(debt.createdAt + 'T00:00:00Z');
+  const startDay   = startDate.getUTCDate();
+  const createdStr = startDate.toISOString().slice(0, 10);
 
-  // Fix 4 — Smart date: compara numericamente dia do vencimento vs dia do cadastro.
-  // Regra: se dueDay <= dia do cadastro → 1ª parcela no mês seguinte.
-  //        se dueDay >  dia do cadastro → 1ª parcela no mês atual (ainda está no prazo).
-  // Ex: cadastro dia 18, dueDay=17 ou 18 → julho; dueDay=19..28 → junho.
-  const startDay = startDate.getUTCDate();
+  // ── Parcela de ENTRADA (sempre paga, número 1) ───────────────────────
+  if (hasEntrada) {
+    list.push({
+      number:         1,
+      value:          entradaVal,
+      originalValue:  entradaVal,
+      dueDate:        createdStr,
+      status:         'paid',
+      isEntrada:      true,
+      isPenalty:      false,
+      penaltyRate:    0,
+      penaltyApplied: true,
+      dueSent:        true,
+      overdueSent:    true,
+      paidDate:       createdStr,
+      paidAmount:     entradaVal,
+      carriedInterest:0,
+      creditPaid:     false,
+      lateInterestPaid:0,
+      manualInterest: 0,
+    });
+  }
+
+  // ── Datas regulares ──────────────────────────────────────────────────
+  const offset   = hasEntrada ? 1 : 0; // offset de número para parcelas regulares
   const firstDue = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), debt.dueDay));
-  if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0); // overflow (ex: 31 em fev)
+  if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0);
   if (debt.dueDay <= startDay) {
-    // Vencimento já passou (ou é hoje) — vai pro próximo mês
     firstDue.setUTCMonth(firstDue.getUTCMonth() + 1);
     firstDue.setUTCDate(debt.dueDay);
     if (firstDue.getUTCDate() !== debt.dueDay) firstDue.setUTCDate(0);
   }
-
-  // Fix 1: recua firstDue por paidCount meses → parcelas pagas ficam no passado
   if (paidCount > 0) {
     firstDue.setUTCMonth(firstDue.getUTCMonth() - paidCount);
     firstDue.setUTCDate(debt.dueDay);
@@ -34,28 +56,31 @@ function generateInstallments(debt, paidCount = 0) {
     dueDate.setUTCMonth(firstDue.getUTCMonth() + i);
     dueDate.setUTCDate(debt.dueDay);
     if (dueDate.getUTCDate() !== debt.dueDay) dueDate.setUTCDate(0);
-
     const dueDateStr  = dueDate.toISOString().slice(0, 10);
     const alreadyPaid = i < paidCount;
-
     list.push({
-      number:         i + 1,
+      number:         i + 1 + offset,
       value:          instValue,
       originalValue:  instValue,
       dueDate:        dueDateStr,
       status:         alreadyPaid ? 'paid' : 'pending',
+      isEntrada:      false,
       isPenalty:      false,
       penaltyRate:    0,
       penaltyApplied: alreadyPaid,
       dueSent:        alreadyPaid,
       overdueSent:    alreadyPaid,
       paidDate:       alreadyPaid ? dueDateStr : null,
+      paidAmount:     alreadyPaid ? instValue : null,
+      carriedInterest:0,
+      creditPaid:     false,
+      lateInterestPaid:0,
+      manualInterest: 0,
     });
   }
   return list;
 }
 
-// GET /api/debts — Listar por tenant
 export async function GET(request) {
   await connectDB();
   const tenant = request.headers.get('x-tenant') || 'default';
@@ -63,7 +88,6 @@ export async function GET(request) {
   return NextResponse.json(debts.map(d => d.toJSON()));
 }
 
-// POST /api/debts — Criar nova dívida
 export async function POST(request) {
   await connectDB();
   const tenant = request.headers.get('x-tenant') || 'default';
@@ -71,7 +95,7 @@ export async function POST(request) {
 
   const {
     name, phone, address, product, total, installments,
-    dueDay, interestRate, notes, startDate, paidInstallments,
+    dueDay, interestRate, notes, startDate, paidInstallments, entrada,
   } = body;
 
   if (!name || !product || !total || !installments || !dueDay || !startDate) {
@@ -84,16 +108,23 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Dia de vencimento deve ser entre 1 e 28' }, { status: 400 });
   }
 
-  const paidCount = Math.min(parseInt(paidInstallments) || 0, parseInt(installments));
-  const totalInst = parseInt(installments);
-  const debtData  = {
+  const entradaVal = parseFloat(entrada) || 0;
+  const totalVal   = parseFloat(total);
+  if (entradaVal >= totalVal && entradaVal > 0) {
+    return NextResponse.json({ error: 'Entrada deve ser menor que o valor total' }, { status: 400 });
+  }
+
+  const totalInst  = parseInt(installments);
+  const paidCount  = Math.min(parseInt(paidInstallments) || 0, totalInst);
+  const debtData   = {
     tenant,
     name, phone: phone || '', address: address || '', product,
-    total:        parseFloat(total),
+    total:        totalVal,
     installments: totalInst,
     dueDay:       parseInt(dueDay),
     interestRate: parseFloat(interestRate) || 10,
     notes:        notes || '',
+    entrada:      entradaVal,
     status:       paidCount >= totalInst ? 'paid' : 'pending',
     createdAt:    startDate,
     installmentList: [],
@@ -103,10 +134,11 @@ export async function POST(request) {
 
   const debt = await Debt.create(debtData);
 
-  const paidLabel = paidCount > 0 ? ` (${paidCount} parcelas ja pagas)` : '';
+  const entradaLabel = entradaVal > 0 ? ` (entrada R$ ${entradaVal.toLocaleString('pt-BR',{minimumFractionDigits:2})})` : '';
+  const paidLabel    = paidCount > 0 ? ` · ${paidCount} parcelas pré-pagas` : '';
   await Activity.create({
     tenant,
-    text: `Nova divida: <strong>${name}</strong> - ${product} (R$ ${Number(total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})${paidLabel}`,
+    text: `Nova divida: <strong>${name}</strong> - ${product} (R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})${entradaLabel}${paidLabel}`,
     type: 'info',
   });
 

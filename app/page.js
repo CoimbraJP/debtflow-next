@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS = {
 };
 const EMPTY_FORM = {
   name: '', phone: '', address: '', product: '', total: '', installments: '',
-  dueDay: '', interestRate: 10, startDate: '', notes: '', paidInstallments: '',
+  dueDay: '', interestRate: 10, startDate: '', notes: '', paidInstallments: '', entrada: '',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -186,6 +186,9 @@ export default function App() {
       if (!f.total || parseFloat(f.total) <= 0)                           errs.total        = 'Valor deve ser maior que zero';
       if (!f.installments || parseInt(f.installments) < 1)                errs.installments = 'Mínimo 1 parcela';
       if (!f.dueDay || parseInt(f.dueDay) < 1 || parseInt(f.dueDay) > 28) errs.dueDay       = 'Entre 1 e 28';
+      const _ent = parseFloat(f.entrada) || 0;
+      const _tot = parseFloat(f.total)   || 0;
+      if (_ent > 0 && _ent >= _tot) errs.entrada = 'Entrada deve ser menor que o valor total';
     }
     return errs;
   }
@@ -1216,6 +1219,29 @@ export default function App() {
             </div>
             {formErrors.total && <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.total}</span>}
           </div>
+          {!editId && (
+            <div className="form-group">
+              <label className="form-label">Entrada <span style={{fontSize:11,fontWeight:400,color:'var(--text-muted)'}}>opcional</span></label>
+              <div className="input-prefix-wrapper">
+                <span className="input-prefix">R$</span>
+                <input className={`form-control${formErrors.entrada?' input-error':''}`} type="number" min="0" step="0.01" placeholder="0,00"
+                  value={debtForm.entrada||''}
+                  onChange={e=>{setDebtForm(f=>({...f,entrada:e.target.value}));if(formErrors.entrada)setFormErrors(fe=>({...fe,entrada:undefined}));}}
+                />
+              </div>
+              {formErrors.entrada
+                ? <span className="form-hint" style={{color:'var(--color-danger)'}}>{formErrors.entrada}</span>
+                : (() => {
+                    const _t=parseFloat(debtForm.total)||0, _e=parseFloat(debtForm.entrada)||0, _n=parseInt(debtForm.installments)||0;
+                    if (_e>0 && _n>0 && _t>_e) {
+                      const _r=parseFloat((_t-_e).toFixed(2)), _p=parseFloat((_r/_n).toFixed(2));
+                      return <span className="form-hint" style={{color:'var(--color-success)'}}>Restante: R$ {_r.toLocaleString('pt-BR',{minimumFractionDigits:2})} ÷ {_n}x = R$ {_p.toLocaleString('pt-BR',{minimumFractionDigits:2})}/parcela</span>;
+                    }
+                    return null;
+                  })()
+              }
+            </div>
+          )}
           <div className="form-group" style={editId?{opacity:.5,pointerEvents:'none'}:{}}>
             <label className="form-label">Número de Parcelas {!editId && <span>*</span>}</label>
             <input className={`form-control${formErrors.installments ? ' input-error' : ''}`} type="number" min="1" max="360" placeholder="1" value={debtForm.installments||''} disabled={!!editId} onChange={e=>{setDebtForm(f=>({...f,installments:e.target.value}));if(formErrors.installments)setFormErrors(fe=>({...fe,installments:undefined}));}} />
@@ -1889,7 +1915,7 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
             const rowBg     = isPaid ? 'rgba(0,200,83,.06)' : isPartial ? 'rgba(255,165,0,.08)' : isSkipped ? 'rgba(255,71,87,.06)' : 'var(--bg-elevated)';
             const rowBorder = isPaid ? 'rgba(0,200,83,.2)' : isPartial ? 'rgba(255,165,0,.3)' : isSkipped ? 'rgba(255,71,87,.2)' : 'var(--border-default)';
             const dotBg     = isPaid ? 'var(--color-success)' : isPartial ? '#f5a623' : isSkipped ? 'var(--color-danger)' : 'var(--border-default)';
-            const dotContent = isPaid ? '✓' : isPartial ? '~' : isSkipped ? '✗' : idx+1;
+            const dotContent = inst.isEntrada ? 'E' : isPaid ? '✓' : isPartial ? '~' : isSkipped ? '✗' : idx+1;
             return (
               <div key={idx} style={{
                 display:'flex',alignItems:'flex-start',gap:10,
@@ -1905,7 +1931,9 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                 }}>{dotContent}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:600}}>
-                    Parcela {idx+1}
+                    {inst.isEntrada
+                      ? <span style={{color:'var(--color-success)',letterSpacing:.8,fontSize:12}}>ENTRADA</span>
+                      : `Parcela ${idx+1}`}
                     {isPartial && <span style={{color:'#f5a623',marginLeft:6,fontSize:11,fontWeight:400}}>• Pagamento Parcial</span>}
                     {isSkipped && <span style={{color:'var(--color-danger)',marginLeft:6,fontSize:11,fontWeight:400}}>• Não Pagou</span>}
                   </div>
@@ -1950,7 +1978,7 @@ function DebtPanel({ debt, today, onClose, onEdit, onPay, onSkip, onDelete, onWh
                     );
                   })()}
                 </div>
-                {!isDone && (() => {
+                {!isDone && !inst.isEntrada && (() => {
                   const _isLastI = !debt.installmentList?.find((p,j) => j > idx && !['paid','partial','skipped'].includes(p.status));
                   return (
                     <div style={{display:'flex',gap:4,marginTop:8}}>
